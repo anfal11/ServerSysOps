@@ -9,6 +9,7 @@ import { api, errMsg } from '@/lib/api'
 import { useApp } from '@/store/app'
 import { Button, Input } from '@/components/ui'
 import { cls } from '@/lib/format'
+import { terminalTheme } from '@/lib/themes'
 
 /* ------------------------------------------------------------------ */
 /* Persistent terminal registry (survives page switches)                */
@@ -44,6 +45,10 @@ function notify(): void {
 function installListener(): void {
   if (listenerInstalled) return
   listenerInstalled = true
+  window.addEventListener('servermate:theme', () => {
+    const theme = terminalTheme()
+    for (const s of registry.values()) for (const tab of s.tabs) tab.term.options.theme = theme
+  })
   api.onEvent((e) => {
     if (e.type === 'terminal:data') {
       const t = byPty.get(e.ptyId)
@@ -86,28 +91,7 @@ function createTab(serverId: string, title?: string): TermTab {
     fontFamily: settings.terminalFontFamily,
     scrollback: settings.terminalScrollback,
     allowProposedApi: true,
-    theme: {
-      background: '#0f1115',
-      foreground: '#e6e8ee',
-      cursor: '#e6e8ee',
-      selectionBackground: '#3b82f680',
-      black: '#1e222b',
-      red: '#ef5350',
-      green: '#4ade80',
-      yellow: '#fbbf24',
-      blue: '#60a5fa',
-      magenta: '#c084fc',
-      cyan: '#22d3ee',
-      white: '#e6e8ee',
-      brightBlack: '#6b7282',
-      brightRed: '#f87171',
-      brightGreen: '#86efac',
-      brightYellow: '#fde68a',
-      brightBlue: '#93c5fd',
-      brightMagenta: '#d8b4fe',
-      brightCyan: '#67e8f9',
-      brightWhite: '#ffffff'
-    }
+    theme: terminalTheme()
   })
   const fit = new FitAddon()
   const search = new SearchAddon()

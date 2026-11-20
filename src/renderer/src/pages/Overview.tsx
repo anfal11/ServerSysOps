@@ -218,8 +218,8 @@ function Sparkline({ title, values, max, fmt, sub }: { title: string; values: nu
       <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full h-12">
         {pts.length > 1 && (
           <>
-            <polygon points={`0,${h} ${pts.join(' ')} ${w},${h}`} fill="rgba(59,130,246,0.15)" />
-            <polyline points={pts.join(' ')} fill="none" stroke="#3b82f6" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+            <polygon points={`0,${h} ${pts.join(' ')} ${w},${h}`} fill="var(--color-accent)" fillOpacity={0.15} />
+            <polyline points={pts.join(' ')} fill="none" stroke="var(--color-accent)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
           </>
         )}
       </svg>

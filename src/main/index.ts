@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell, ipcMain, nativeTheme, Menu } from 'electron'
 import { join } from 'path'
 import { createContext } from './core'
+import pkg from '../../package.json'
 import * as servers from './services/servers'
 import * as terminal from './services/terminal'
 import * as overview from './services/overview'
@@ -71,7 +72,7 @@ app.whenReady().then(() => {
   }
   updater.register(ctx)
 
-  ipcMain.handle('app:info', () => ({ version: app.getVersion(), platform: process.platform, userData: app.getPath('userData'), electron: process.versions.electron }))
+  ipcMain.handle('app:info', () => ({ version: app.isPackaged ? app.getVersion() : (pkg as { version: string }).version, platform: process.platform, userData: app.getPath('userData'), electron: process.versions.electron }))
   ipcMain.on('app:openExternal', (_e, url: string) => {
     if (/^https?:/.test(url)) shell.openExternal(url)
   })

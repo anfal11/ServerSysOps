@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react'
 import { useApp } from '@/store/app'
-import { Button, Checkbox, Field, Input, Modal, Select } from '@/components/ui'
+import { Button, Checkbox, Field, Input, Modal } from '@/components/ui'
 import type { AppSettings } from '@shared/types'
 import { api } from '@/lib/api'
+import { THEMES, applyTheme } from '@/lib/themes'
+import { cls } from '@/lib/format'
+import { Check } from 'lucide-react'
 
 export default function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }): React.JSX.Element {
   const settings = useApp((s) => s.settings)
@@ -20,10 +23,18 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
       open={open}
       onClose={onClose}
       title="Settings"
+      width="max-w-2xl"
       footer={
         <>
           <span className="text-dim text-xs mr-auto">ServerMate v{version}</span>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            onClick={() => {
+              applyTheme(settings.theme)
+              onClose()
+            }}
+          >
+            Cancel
+          </Button>
           <Button
             variant="primary"
             onClick={async () => {
@@ -49,11 +60,31 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
         <Field label="Terminal scrollback (lines)">
           <Input type="number" min={500} step={500} value={draft.terminalScrollback} onChange={num('terminalScrollback')} />
         </Field>
-        <Field label="Theme">
-          <Select value={draft.theme} onChange={(e) => set('theme', e.target.value as AppSettings['theme'])}>
-            <option value="dark">Dark</option>
-          </Select>
-        </Field>
+        <div className="col-span-2">
+          <div className="text-xs text-muted mb-1.5 font-medium">Colour theme</div>
+          <div className="grid grid-cols-4 gap-2">
+            {THEMES.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => {
+                  set('theme', t.id)
+                  applyTheme(t.id)
+                }}
+                className={cls('relative rounded-md border p-2 text-left transition-colors', draft.theme === t.id ? 'border-accent ring-2 ring-accent/30' : 'border-border-2 hover:border-muted')}
+                style={{ background: t.swatch[0], color: t.swatch[3] }}
+              >
+                <div className="flex gap-1 mb-1.5">
+                  <span className="h-3 flex-1 rounded-sm" style={{ background: t.swatch[1] }} />
+                  <span className="h-3 w-5 rounded-sm" style={{ background: t.swatch[2] }} />
+                </div>
+                <div className="text-[11px] font-medium truncate">{t.name}</div>
+                {draft.theme === t.id && <Check size={12} className="absolute top-1.5 right-1.5" style={{ color: t.swatch[2] }} />}
+              </button>
+            ))}
+          </div>
+          <div className="text-[11px] text-dim mt-1.5">Previews immediately; Cancel restores the saved theme.</div>
+        </div>
         <div className="col-span-2 flex flex-col gap-2 pt-1">
           <Checkbox checked={draft.autoReconnect} onChange={(v) => set('autoReconnect', v)} label="Reconnect automatically after drops or sleep" />
           <Checkbox checked={draft.confirmDangerous} onChange={(v) => set('confirmDangerous', v)} label="Ask before dangerous actions (delete, reboot, kill…)" />

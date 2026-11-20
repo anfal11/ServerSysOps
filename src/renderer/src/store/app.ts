@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { AlertEvent, AppSettings, ConnectionState, ServerProfile, TaskInfo } from '@shared/types'
 import { DEFAULT_SETTINGS } from '@shared/types'
 import { api } from '@/lib/api'
+import { applyTheme } from '@/lib/themes'
 
 export type PageId =
   | 'overview'
@@ -91,6 +92,7 @@ export const useApp = create<AppState>((set, get) => ({
     const connections: Record<string, ConnectionState> = {}
     for (const s of states) connections[s.serverId] = s
     set({ servers, connections, tasks, settings, appVersion: info.version, alerts })
+    applyTheme(settings.theme)
     api.onEvent((e) => {
       if (e.type === 'connection') {
         set((st) => ({ connections: { ...st.connections, [e.state.serverId]: e.state } }))
@@ -161,6 +163,7 @@ export const useApp = create<AppState>((set, get) => ({
   async saveSettings(patch) {
     const settings = await api.global<AppSettings>('settings:set', patch)
     set({ settings })
+    applyTheme(settings.theme)
   },
   async refreshAlerts() {
     set({ alerts: await api.global<AlertEvent[]>('alerts:list') })

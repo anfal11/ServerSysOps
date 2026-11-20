@@ -27,7 +27,20 @@ Inspired by Serverias, rebuilt from scratch and extended.
 | **Alerts** | Background checks of CPU, memory and disk on all connected servers with thresholds, cooldowns and desktop notifications; fleet overview. |
 | **Activity log** | Local record of every change the app made, per server. |
 
-Also: background tasks with live output, automatic reconnection after drops or sleep, host-key change warnings, jump hosts (bastions), server groups and colours, import/export of profiles (without secrets), settings for metrics interval, terminal font, confirmations and alert thresholds.
+Also: background tasks with live output, automatic reconnection after drops or sleep, host-key change warnings, jump hosts (bastions), server groups and colours, import/export of profiles (without secrets), settings for metrics interval, terminal font, confirmations and alert thresholds, and **11 colour themes** (Graphite, Midnight Blue, Dracula, Nord, Catppuccin Mocha, Solarized Dark, Forest, Ember, Monochrome, Light, Paper) that restyle the whole UI including the terminal.
+
+## Download and install (Windows)
+
+Two ready-to-run files are produced in `release/` by `npm run dist`:
+
+| File | Use |
+|---|---|
+| `ServerMate_<version>_x64-setup.exe` | Installer (per-user, no admin rights needed, desktop + Start menu shortcut, uninstaller). Put this on your website for one-click download → install. |
+| `ServerMate_<version>_x64-portable.exe` | Single-file portable build: runs from a USB stick or any folder without installing. Settings live in `%APPDATA%\ServerMate`. |
+
+Hosting it yourself: upload the setup `.exe` (and, for self-updates, `latest.yml` plus the `.exe.blockmap`) to a folder on your site, then set that folder's URL under `publish.url` in `electron-builder.yml` before building. Installed copies check that URL on start and offer the update in Settings.
+
+The build is not code-signed, so Windows SmartScreen shows "Windows protected your PC" the first time: click **More info → Run anyway**. To remove that warning, sign the exe with an Authenticode certificate (set `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD` for electron-builder). macOS and Linux packages need to be built on those platforms (`npm run dist:mac`, `npm run dist:linux`).
 
 ## Security model
 

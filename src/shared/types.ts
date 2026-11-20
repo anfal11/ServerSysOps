@@ -87,7 +87,8 @@ export interface TaskInfo {
 }
 
 export interface AppSettings {
-  theme: 'dark' | 'light' | 'system'
+  /** Colour theme id (see renderer/src/lib/themes.ts). */
+  theme: string
   terminalFontSize: number
   terminalFontFamily: string
   terminalScrollback: number
@@ -103,7 +104,7 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  theme: 'dark',
+  theme: 'graphite',
   terminalFontSize: 13,
   terminalFontFamily: 'Cascadia Mono, Consolas, "JetBrains Mono", Menlo, monospace',
   terminalScrollback: 10000,

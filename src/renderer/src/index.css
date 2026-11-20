@@ -25,6 +25,15 @@
   color-scheme: dark;
 }
 
+:root[data-theme='light'],
+:root[data-theme='paper'] {
+  color-scheme: light;
+}
+:root[data-theme='light'] .shadow-2xl,
+:root[data-theme='paper'] .shadow-2xl {
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.18);
+}
+
 html,
 body,
 #root {
@@ -40,14 +49,14 @@ body,
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #343946 transparent;
+  scrollbar-color: var(--color-border-2) transparent;
 }
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #343946;
+  background: var(--color-border-2);
   border-radius: 8px;
   border: 2px solid transparent;
   background-clip: content-box;

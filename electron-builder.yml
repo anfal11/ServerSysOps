@@ -13,7 +13,12 @@ win:
   target:
     - target: nsis
       arch: [x64]
+    - target: portable
+      arch: [x64]
   artifactName: ${productName}_${version}_${arch}-setup.${ext}
+  icon: build/icon.ico
+portable:
+  artifactName: ${productName}_${version}_${arch}-portable.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
@@ -26,7 +31,9 @@ mac:
 linux:
   target: [AppImage, deb, rpm]
   category: Development
+# Self-update feed: upload release/latest.yml, the -setup.exe and its .blockmap to this folder on your
+# website, then set the URL here (the installed app checks it on start when "Check for updates" is on).
 publish:
   provider: generic
-  url: https://example.invalid/servermate/updates
+  url: https://downloads.example.com/servermate
 npmRebuild: false

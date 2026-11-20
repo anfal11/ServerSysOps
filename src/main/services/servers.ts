@@ -1,9 +1,9 @@
-import { dialog } from 'electron'
+import { dialog, nativeTheme } from 'electron'
 import { readFileSync, writeFileSync } from 'fs'
 import type { Ctx } from '../core'
 import * as store from '../store/servers'
 import { getSettings, setSettings, listAudit, clearAudit } from '../store/settings'
-import type { ServerProfileInput, ServerSecrets } from '@shared/types'
+import type { AppSettings, ServerProfileInput, ServerSecrets } from '@shared/types'
 import { SshClient, SshError } from '../ssh/SshClient'
 
 export function register(ctx: Ctx): void {
@@ -68,7 +68,16 @@ export function register(ctx: Ctx): void {
 
   // ----- settings / audit -----
   ctx.handle('settings:get', () => getSettings())
-  ctx.handle('settings:set', (_s, patch) => setSettings(patch))
+  const LIGHT_THEMES = ['light', 'paper']
+  const applyNativeTheme = (theme: string): void => {
+    nativeTheme.themeSource = LIGHT_THEMES.includes(theme) ? 'light' : 'dark'
+  }
+  applyNativeTheme(getSettings().theme)
+  ctx.handle('settings:set', (_s, patch: Partial<AppSettings>) => {
+    const next = setSettings(patch)
+    applyNativeTheme(next.theme)
+    return next
+  })
   ctx.handle('audit:list', (_s, limit?: number) => listAudit(limit))
   ctx.handle('audit:clear', () => clearAudit())
 

@@ -42,7 +42,7 @@ export function getSecrets(id: string): ServerSecrets {
 }
 
 export function saveServer(input: ServerProfileInput): ServerProfile {
-  const { password, passphrase, sudoPassword, ...rest } = input
+  const { password, passphrase, sudoPassword, totpSecret, ...rest } = input
   const data = store.read()
   const existing = rest.id ? data.servers.find((s) => s.id === rest.id) : undefined
   const id = existing?.id ?? rest.id ?? randomUUID()
@@ -50,7 +50,8 @@ export function saveServer(input: ServerProfileInput): ServerProfile {
   const secrets: ServerSecrets = {
     password: password !== undefined ? password || undefined : prevSecrets.password,
     passphrase: passphrase !== undefined ? passphrase || undefined : prevSecrets.passphrase,
-    sudoPassword: sudoPassword !== undefined ? sudoPassword || undefined : prevSecrets.sudoPassword
+    sudoPassword: sudoPassword !== undefined ? sudoPassword || undefined : prevSecrets.sudoPassword,
+    totpSecret: totpSecret !== undefined ? totpSecret.replace(/\s+/g, '').toUpperCase() || undefined : prevSecrets.totpSecret
   }
   const profile: ServerProfile = {
     ...(existing ?? { createdAt: Date.now() }),
@@ -59,7 +60,8 @@ export function saveServer(input: ServerProfileInput): ServerProfile {
     port: Number(rest.port) || 22,
     hasPassword: !!secrets.password,
     hasPassphrase: !!secrets.passphrase,
-    hasSudoPassword: !!secrets.sudoPassword
+    hasSudoPassword: !!secrets.sudoPassword,
+    hasTotpSecret: !!secrets.totpSecret
   } as ServerProfile
   const servers = existing ? data.servers.map((s) => (s.id === id ? profile : s)) : [...data.servers, profile]
   store.write({ servers, secrets: { ...data.secrets, [id]: encrypt(secrets) } })
@@ -71,7 +73,7 @@ export function updateSecrets(id: string, patch: ServerSecrets): void {
   const cur = decrypt(data.secrets[id])
   const next = { ...cur, ...patch }
   const servers = data.servers.map((s) =>
-    s.id === id ? { ...s, hasPassword: !!next.password, hasPassphrase: !!next.passphrase, hasSudoPassword: !!next.sudoPassword } : s
+    s.id === id ? { ...s, hasPassword: !!next.password, hasPassphrase: !!next.passphrase, hasSudoPassword: !!next.sudoPassword, hasTotpSecret: !!next.totpSecret } : s
   )
   store.write({ servers, secrets: { ...data.secrets, [id]: encrypt(next) } })
 }
@@ -99,7 +101,7 @@ export function reorderServers(ids: string[]): void {
 
 /** Export profiles without secrets (for backup / sharing). */
 export function exportServers(): ServerProfile[] {
-  return listServers().map((s) => ({ ...s, hasPassword: false, hasPassphrase: false, hasSudoPassword: false }))
+  return listServers().map((s) => ({ ...s, hasPassword: false, hasPassphrase: false, hasSudoPassword: false, hasTotpSecret: false }))
 }
 
 export function importServers(list: ServerProfileInput[]): number {

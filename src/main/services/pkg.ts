@@ -50,7 +50,7 @@ export function removeCmd(ssh: SshClient, pkgs: string[]): string {
 export function upgradeAllCmd(ssh: SshClient): string {
   switch (ssh.os?.pkgManager) {
     case 'apt':
-      return `apt-get update -qq && apt-get upgrade -y -qq -o Dpkg::Options::=--force-confold && apt-get autoremove -y -qq`
+      return `apt-get update -qq && apt-get upgrade -y -qq --with-new-pkgs -o Dpkg::Options::=--force-confold && apt-get autoremove -y -qq`
     case 'dnf':
       return `dnf upgrade -y`
     case 'yum':
@@ -89,8 +89,21 @@ export function refreshCmd(ssh: SshClient): string {
 export async function listUpgradable(ssh: SshClient): Promise<{ list: string[]; security: number }> {
   switch (ssh.os?.pkgManager) {
     case 'apt': {
-      const r = await ssh.exec('apt list --upgradable 2>/dev/null | tail -n +2')
-      const list = r.stdout.split('\n').filter(Boolean)
+      // Simulate the same upgrade "Install" runs, so the count matches what actually gets installed
+      // (apt list --upgradable also shows phased / held-back packages that apt-get upgrade skips).
+      const sim = await ssh.exec("apt-get -s -o Debug::NoLocking=1 upgrade --with-new-pkgs 2>/dev/null | grep '^Inst ' || true")
+      let list = sim.stdout
+        .split('\n')
+        .filter((l) => l.startsWith('Inst '))
+        .map((l) => {
+          // Inst pkg [old] (new repo [arch]) ...
+          const m = l.match(/^Inst (\S+)(?: \[([^\]]+)\])? \(([^\s)]+) ([^)]*)\)/)
+          return m ? `${m[1]} ${m[2] ? m[2] + ' -> ' : ''}${m[3]} [${m[4].split(' ')[0]}]` : l.slice(5)
+        })
+      if (!list.length && sim.code !== 0) {
+        const r = await ssh.exec('apt list --upgradable 2>/dev/null | tail -n +2')
+        list = r.stdout.split('\n').filter(Boolean)
+      }
       const security = list.filter((l) => /-security/i.test(l)).length
       return { list, security }
     }

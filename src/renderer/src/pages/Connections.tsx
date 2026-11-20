@@ -155,8 +155,8 @@ function ServerForm({ server, onClose }: { server: ServerProfile | null; onClose
   const { servers, refreshServers, connect } = useApp()
   const [f, setF] = useState<ServerProfileInput>(
     server
-      ? { ...server, password: undefined, passphrase: undefined, sudoPassword: undefined }
-      : { name: '', host: '', port: 22, username: 'root', auth: 'password', sudoMode: 'same', color: COLORS[0], group: '', privateKeyPath: '', password: '', passphrase: '', sudoPassword: '' }
+      ? { ...server, password: undefined, passphrase: undefined, sudoPassword: undefined, totpSecret: undefined }
+      : { name: '', host: '', port: 22, username: 'root', auth: 'password', sudoMode: 'same', color: COLORS[0], group: '', privateKeyPath: '', password: '', passphrase: '', sudoPassword: '', totpSecret: '' }
   )
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; os?: OsInfo; sudoOk?: boolean; error?: string; code?: string } | null>(null)
@@ -283,6 +283,13 @@ function ServerForm({ server, onClose }: { server: ServerProfile | null; onClose
                 </option>
               ))}
           </Select>
+        </Field>
+        <Field
+          label={server?.hasTotpSecret ? '2FA / TOTP secret (blank = keep)' : '2FA / TOTP secret (optional)'}
+          className="col-span-6"
+          hint="If SSH asks for a Google Authenticator verification code, paste the account's base32 secret here and the app answers the prompt itself. Leave empty to be asked for the code at each login."
+        >
+          <Input type="password" value={f.totpSecret ?? ''} onChange={(e) => set('totpSecret', e.target.value)} autoComplete="off" mono placeholder="JBSWY3DPEHPK3PXP" />
         </Field>
         <Field label="Notes" className="col-span-6">
           <Input value={f.notes ?? ''} onChange={(e) => set('notes', e.target.value)} placeholder="optional" />

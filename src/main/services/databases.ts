@@ -21,11 +21,13 @@ import type {
   MongoCollection,
   MongoDocsOptions,
   MongoDocsResult,
+  MssqlInstallInput,
+  MssqlSettings,
   SqliteOpenResult
 } from '@shared/modules/databases'
-import { DB_BACKUPS_DIR, DB_EXPORT_MAX_BYTES, DB_IMPORT_MAX_BYTES, DB_ROWS_MAX_LIMIT } from '@shared/modules/databases'
+import { DB_BACKUPS_DIR, DB_EXPORT_MAX_BYTES, DB_IMPORT_MAX_BYTES, DB_ROWS_MAX_LIMIT, MSSQL_BACKUP_DIR, isStrongSqlPassword } from '@shared/modules/databases'
 import { assertAbsPath, b64Echo, shq } from '../ssh/shell'
-import { installCmd, runPkg } from './pkg'
+import { installCmd, pkgEnv, runPkg } from './pkg'
 
 /*
  * Databases module (main process).
@@ -65,8 +67,11 @@ function getCred(serverId: string, engine: DbEngine): Cred | undefined {
   return creds.get(serverId)?.[engine]
 }
 
-const AUTH_RE = /access denied|password authentication failed|authentication failed|requires authentication|peer authentication failed|ERROR 1045|Unauthorized|not authorized/i
-const DOWN_RE = /can't connect to local|could not connect to server|connection refused|No such file or directory|ECONNREFUSED|is the server running|MongoNetworkError|Connection reset/i
+const AUTH_RE = /access denied|password authentication failed|authentication failed|requires authentication|peer authentication failed|ERROR 1045|Unauthorized|not authorized|Login failed for user|credentials required/i
+const DOWN_RE = /can't connect to local|could not connect to server|connection refused|No such file or directory|ECONNREFUSED|is the server running|MongoNetworkError|Connection reset|TCP Provider|Could not open a connection|Unable to connect|Login timeout expired/i
+
+/** mssql: TCP port learned from mssql.conf (default 1433), per server. */
+const mssqlPorts = new Map<string, number>()
 
 function throwExec(engine: DbEngine, r: ExecResult, fallback: string): never {
   const msg = (r.stderr || r.stdout || fallback).trim()
@@ -77,7 +82,7 @@ function throwExec(engine: DbEngine, r: ExecResult, fallback: string): never {
 }
 
 function engineLabel(e: DbEngine): string {
-  return e === 'mysql' ? 'MySQL/MariaDB' : e === 'postgres' ? 'PostgreSQL' : e === 'mongo' ? 'MongoDB' : 'SQLite'
+  return e === 'mysql' ? 'MySQL/MariaDB' : e === 'postgres' ? 'PostgreSQL' : e === 'mongo' ? 'MongoDB' : e === 'mssql' ? 'SQL Server' : 'SQLite'
 }
 
 /* ------------------------------------------------------------------ */
@@ -110,9 +115,10 @@ function assertHost(h: unknown): string {
 }
 
 function assertEngine(e: unknown): DbEngine {
-  if (e === 'mysql' || e === 'postgres' || e === 'mongo' || e === 'sqlite') return e
+  if (e === 'mysql' || e === 'postgres' || e === 'mongo' || e === 'mssql' || e === 'sqlite') return e
   throw new Error(`Unknown database engine: ${String(e)}`)
 }
+const SYSTEM_MSSQL_DBS = new Set(['master', 'model', 'msdb', 'tempdb'])
 
 /** Back-tick quote (MySQL). */
 function qMy(name: string): string {
@@ -128,12 +134,31 @@ function qPgTable(table: string): string {
   if (idx > 0) return qDq(table.slice(0, idx)) + '.' + qDq(table.slice(idx + 1))
   return qDq(table)
 }
+/** Bracket quote (SQL Server). */
+function qBr(name: string): string {
+  return '[' + assertLooseIdent(name).replace(/]/g, ']]') + ']'
+}
+/** Quote a possibly schema-qualified SQL Server table name ("schema.table" or "table" => dbo). */
+function qMsTable(table: string): string {
+  const [schema, name] = splitSchema(table, 'dbo')
+  return qBr(schema) + '.' + qBr(name)
+}
+function splitSchema(table: string, def: string): [string, string] {
+  const idx = table.indexOf('.')
+  if (idx > 0) return [table.slice(0, idx), table.slice(idx + 1)]
+  return [def, table]
+}
 function qIdent(engine: DbEngine, name: string): string {
-  return engine === 'mysql' ? qMy(name) : qDq(name)
+  return engine === 'mysql' ? qMy(name) : engine === 'mssql' ? qBr(name) : qDq(name)
 }
 function qTable(engine: DbEngine, table: string): string {
   if (engine === 'postgres') return qPgTable(table)
+  if (engine === 'mssql') return qMsTable(table)
   return qIdent(engine, table)
+}
+/** SQL Server unicode string literal. */
+function nStr(v: string): string {
+  return 'N' + sqlStr(v)
 }
 /** MySQL string literal (backslash is an escape char in MySQL strings). */
 function myStr(v: string): string {
@@ -145,7 +170,7 @@ function sqlStr(v: string): string {
 }
 function lit(engine: DbEngine, v: string | null): string {
   if (v === null) return 'NULL'
-  return engine === 'mysql' ? myStr(v) : sqlStr(v)
+  return engine === 'mysql' ? myStr(v) : engine === 'mssql' ? nStr(v) : sqlStr(v)
 }
 /** MySQL account literal 'user'@'host'. */
 function myAccount(user: string, host: string): string {
@@ -329,6 +354,72 @@ async function sqliteQuery(ssh: SshClient, path: string, sql: string, o: DriverO
   return parseGrid(lines, US, '\\N')
 }
 
+// ---- SQL Server (sqlcmd) ----
+
+/**
+ * sqlcmd always needs a SQL login; the password travels in SQLCMDPASSWORD (exported by the exec
+ * wrapper, never on the command line). Output: header line, dashed line, rows, blank line,
+ * optional "(N rows affected)" footer; fields separated by \x1f (-s) and trimmed (-W).
+ */
+function mssqlCmd(serverId: string, extra: string): { cmd: string; env: Record<string, string> } {
+  const cred = getCred(serverId, 'mssql')
+  if (!cred) throw new DbError('DB_AUTH', 'SQL Server login credentials required (default login: sa). Set them with "Admin credentials".')
+  const port = mssqlPorts.get(serverId) ?? 1433
+  const inner = `B=$( { command -v sqlcmd || ls /opt/mssql-tools18/bin/sqlcmd /opt/mssql-tools/bin/sqlcmd; } 2>/dev/null | head -1); exec "\${B:-sqlcmd}" -S ${shq(`localhost,${port}`)} -U ${shq(cred.user)} -C -b -r 1 -W -w 65535 -s "$(printf '\\037')" ${extra}`
+  return { cmd: `sh -c ${shq(inner)}`, env: { SQLCMDPASSWORD: cred.password } }
+}
+
+async function mssqlExec(ssh: SshClient, serverId: string, sql: string, o: DriverOpts = {}): Promise<ExecResult> {
+  const { cmd, env } = mssqlCmd(serverId, o.db ? `-d ${shq(assertIdent(o.db, 'database name'))}` : '')
+  const text = /\n\s*GO\s*$/i.test(sql) ? sql + '\n' : sql + '\nGO\n'
+  return ssh.exec(cmd, { stdin: text, env, timeoutMs: o.timeoutMs ?? 60000, maxBuffer: o.maxBuffer, onStdout: o.onStdout, onStderr: o.onStderr, signal: o.signal })
+}
+
+const MSSQL_FOOTER_RE = /^\((\d+) rows? affected\)$/
+
+function parseSqlcmd(out: string): { grids: Grid[]; affected?: number; messages: string[] } {
+  const lines = splitLines(out)
+  const grids: Grid[] = []
+  const messages: string[] = []
+  let affected: number | undefined
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    if (line.trim() === '') {
+      i++
+      continue
+    }
+    const m = line.match(MSSQL_FOOTER_RE)
+    if (m) {
+      affected = (affected ?? 0) + Number(m[1])
+      i++
+      continue
+    }
+    const next = lines[i + 1]
+    if (next !== undefined && next.includes('-') && /^[-\x1f]+$/.test(next)) {
+      const columns = line.split(US).map((c) => c.trim())
+      i += 2
+      const rows: (string | null)[][] = []
+      while (i < lines.length && lines[i] !== '' && !MSSQL_FOOTER_RE.test(lines[i])) {
+        rows.push(lines[i].split(US).map((c) => (c === 'NULL' ? null : c)))
+        i++
+      }
+      grids.push({ columns, rows })
+      continue
+    }
+    messages.push(line)
+    i++
+  }
+  return { grids, affected, messages }
+}
+
+async function mssqlQuery(ssh: SshClient, serverId: string, sql: string, o: DriverOpts = {}): Promise<Grid> {
+  const r = await mssqlExec(ssh, serverId, 'SET NOCOUNT ON;\n' + sql, o)
+  if (r.code !== 0) throwExec('mssql', r, 'sqlcmd failed')
+  const p = parseSqlcmd(r.stdout)
+  return p.grids[0] ?? { columns: [], rows: [] }
+}
+
 /** Dispatch a plain query (header + rows) to the right engine. `db` is the file path for sqlite. */
 async function query(engine: DbEngine, ssh: SshClient, serverId: string, db: string | undefined, sql: string, o: DriverOpts = {}): Promise<Grid> {
   switch (engine) {
@@ -336,6 +427,8 @@ async function query(engine: DbEngine, ssh: SshClient, serverId: string, db: str
       return myQuery(ssh, serverId, sql, { ...o, db })
     case 'postgres':
       return pgQuery(ssh, serverId, sql, { ...o, db })
+    case 'mssql':
+      return mssqlQuery(ssh, serverId, sql, { ...o, db })
     case 'sqlite':
       if (!db) throw new Error('SQLite database path is required')
       return sqliteQuery(ssh, db, sql, o)
@@ -366,7 +459,7 @@ function requireSystemd(ssh: SshClient): void {
 }
 
 async function unitFor(ssh: SshClient, engine: DbEngine): Promise<string> {
-  const candidates = engine === 'mysql' ? ['mariadb', 'mysql', 'mysqld'] : engine === 'postgres' ? ['postgresql'] : engine === 'mongo' ? ['mongod', 'mongodb'] : []
+  const candidates = engine === 'mysql' ? ['mariadb', 'mysql', 'mysqld'] : engine === 'postgres' ? ['postgresql'] : engine === 'mongo' ? ['mongod', 'mongodb'] : engine === 'mssql' ? ['mssql-server'] : []
   if (engine === 'postgres') {
     const r = await ssh.exec(
       `if systemctl cat postgresql.service >/dev/null 2>&1; then echo postgresql; else systemctl list-unit-files --no-legend 'postgresql*.service' 2>/dev/null | awk '{print $1}' | grep -v '@\\.service$' | head -1 | sed 's/\\.service$//'; fi`
@@ -388,18 +481,22 @@ function ts(): string {
 }
 
 const BACKUP_RE = /^(.+)-(\d{8}-\d{6})\.(mysql|pg|mongo)\.(sql\.gz|archive\.gz)$/
+const MSSQL_BACKUP_RE = /^(.+)-(\d{8}-\d{6})\.bak$/
 
 function backupPath(engine: DbEngine, db: string): string {
+  if (engine === 'mssql') return `${MSSQL_BACKUP_DIR}/${db}-${ts()}.bak`
   const tag = engine === 'mysql' ? 'mysql' : engine === 'postgres' ? 'pg' : 'mongo'
   const ext = engine === 'mongo' ? 'archive.gz' : 'sql.gz'
   return `${DB_BACKUPS_DIR}/${db}-${ts()}.${tag}.${ext}`
 }
 
 function assertBackupFile(file: unknown): string {
-  if (typeof file !== 'string' || !file.startsWith(DB_BACKUPS_DIR + '/') || file.includes('..') || file.includes('\0') || file.slice(DB_BACKUPS_DIR.length + 1).includes('/')) {
-    throw new Error('Backup file must be inside ' + DB_BACKUPS_DIR)
+  if (typeof file === 'string' && !file.includes('..') && !file.includes('\0')) {
+    for (const dir of [DB_BACKUPS_DIR, MSSQL_BACKUP_DIR]) {
+      if (file.startsWith(dir + '/') && !file.slice(dir.length + 1).includes('/') && file.length > dir.length + 1) return file
+    }
   }
-  return file
+  throw new Error(`Backup file must be inside ${DB_BACKUPS_DIR} or ${MSSQL_BACKUP_DIR}`)
 }
 
 function csvEscape(v: string | null): string {
@@ -444,9 +541,39 @@ echo __MONGOUNIT; echo "$MO"
 echo __MONGOACTIVE; [ -n "$MO" ] && systemctl is-active "$MO" 2>/dev/null
 echo __MONGOENABLED; [ -n "$MO" ] && systemctl is-enabled "$MO" 2>/dev/null
 echo __MONGOCONF; grep -E '^\\s*(dbPath|port|bindIp):' /etc/mongod.conf 2>/dev/null
+echo __MSSQL; [ -x /opt/mssql/bin/sqlservr ] && echo yes
+echo __MSSQLVER; /opt/mssql/bin/sqlservr --version 2>/dev/null | head -1
+echo __MSSQLCMD; { command -v sqlcmd || ls /opt/mssql-tools18/bin/sqlcmd /opt/mssql-tools/bin/sqlcmd; } 2>/dev/null | head -1
+echo __MSSQLUNIT; systemctl cat mssql-server.service >/dev/null 2>&1 && echo mssql-server
+echo __MSSQLACTIVE; systemctl is-active mssql-server 2>/dev/null
+echo __MSSQLENABLED; systemctl is-enabled mssql-server 2>/dev/null
+echo __MSSQLCONF; cat /var/opt/mssql/mssql.conf 2>/dev/null
+echo __MSSQLSIZE; du -sb /var/opt/mssql/data 2>/dev/null | awk '{print $1}'
+echo __MEM; awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo 2>/dev/null
 echo __SQLITE; sqlite3 --version 2>/dev/null | head -1
-echo __BACKUPS; ls -1 ${DB_BACKUPS_DIR} 2>/dev/null | wc -l
+echo __BACKUPS; (ls -1 ${DB_BACKUPS_DIR} 2>/dev/null; ls -1 ${MSSQL_BACKUP_DIR}/*.bak 2>/dev/null) | wc -l
 echo __END`
+
+/** Parse the tiny INI format of /var/opt/mssql/mssql.conf. */
+function parseMssqlConf(lines: string[]): MssqlSettings {
+  let section = ''
+  const kv: Record<string, string> = {}
+  for (const raw of lines) {
+    const l = raw.trim()
+    const s = l.match(/^\[(.+)]$/)
+    if (s) {
+      section = s[1].toLowerCase()
+      continue
+    }
+    const m = l.match(/^([A-Za-z0-9_.]+)\s*=\s*(.*)$/)
+    if (m) kv[`${section}.${m[1].toLowerCase()}`] = m[2].trim()
+  }
+  return {
+    port: num(kv['network.tcpport']) ?? 1433,
+    memoryLimitMb: num(kv['memory.memorylimitmb']),
+    agentEnabled: /^true$/i.test(kv['sqlagent.enabled'] ?? '')
+  }
+}
 
 function parseSections(out: string): Record<string, string[]> {
   const sec: Record<string, string[]> = {}
@@ -589,15 +716,60 @@ async function status(ssh: SshClient, serverId: string): Promise<DbStatusSummary
     if (mongo.sizeBytes === undefined) mongo.sizeBytes = await diskSize(ssh, mongo.dataDir)
   }
 
+  // ---- SQL Server ----
+  const msUnit = first(sec, 'MSSQLUNIT')
+  const msConf = parseMssqlConf(sec.MSSQLCONF ?? [])
+  mssqlPorts.set(serverId, msConf.port)
+  const mssql: DbEngineStatus = {
+    engine: 'mssql',
+    installed: first(sec, 'MSSQL') === 'yes' || !!msUnit,
+    version: first(sec, 'MSSQLVER').replace(/^Microsoft SQL Server\s*/i, '').trim() || undefined,
+    unit: msUnit || undefined,
+    running: first(sec, 'MSSQLACTIVE') === 'active',
+    enabled: first(sec, 'MSSQLENABLED') === 'enabled',
+    clientAvailable: !!first(sec, 'MSSQLCMD'),
+    dumpToolAvailable: !!first(sec, 'MSSQLCMD'),
+    usingCredentials: !!getCred(serverId, 'mssql'),
+    dataDir: '/var/opt/mssql/data',
+    port: msConf.port,
+    bindAddress: '0.0.0.0',
+    sizeBytes: num(first(sec, 'MSSQLSIZE')),
+    mssql: msConf
+  }
+  if (mssql.installed && mssql.running && mssql.clientAvailable) {
+    if (!getCred(serverId, 'mssql')) {
+      mssql.authOk = false
+      mssql.authError = 'SQL Server needs a SQL login (sa by default). Enter the password under "Admin credentials".'
+    } else {
+      try {
+        const g = await mssqlQuery(
+          ssh,
+          serverId,
+          "SELECT CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(64)), CAST(SERVERPROPERTY('Edition') AS nvarchar(128)), CAST(SERVERPROPERTY('ProductLevel') AS nvarchar(32)), CAST(SERVERPROPERTY('Collation') AS nvarchar(128)), (SELECT COUNT(*) FROM sys.databases WHERE database_id > 4), CAST(SERVERPROPERTY('ProductMajorVersion') AS nvarchar(8))",
+          { timeoutMs: 20000 }
+        )
+        const row = g.rows[0] ?? []
+        mssql.authOk = true
+        mssql.version = row[0] ?? mssql.version
+        mssql.edition = row[1] ?? undefined
+        mssql.details = { productLevel: row[2] ?? '', collation: row[3] ?? '', userDatabases: row[4] ?? '', agent: msConf.agentEnabled ? 'enabled' : 'disabled', memoryLimit: msConf.memoryLimitMb ? `${msConf.memoryLimitMb} MB` : 'default (80 % of RAM)' }
+      } catch (e) {
+        mssql.authOk = false
+        mssql.authError = e instanceof Error ? e.message : String(e)
+      }
+    }
+  }
+
   const sqliteVer = first(sec, 'SQLITE')
   return {
     mysql,
     postgres,
     mongo,
+    mssql,
     sqlite: { installed: !!sqliteVer, version: sqliteVer.split(' ')[0] || undefined },
     backupsDir: DB_BACKUPS_DIR,
     backupsCount: Number(first(sec, 'BACKUPS')) || 0,
-    os: { pkgManager: ssh.os?.pkgManager ?? 'unknown', id: ssh.os?.id ?? 'linux', prettyName: ssh.os?.prettyName ?? 'Linux' }
+    os: { pkgManager: ssh.os?.pkgManager ?? 'unknown', id: ssh.os?.id ?? 'linux', prettyName: ssh.os?.prettyName ?? 'Linux', versionId: ssh.os?.versionId ?? '', memTotalBytes: num(first(sec, 'MEM')) }
   }
 }
 
@@ -689,6 +861,86 @@ async function installMongo(ssh: SshClient, h: TaskHandle): Promise<void> {
   h.log('mongod is up (listening on 127.0.0.1:27017, no authentication by default).')
 }
 
+function mssqlPlatform(ssh: SshClient): { kind: 'ubuntu'; ver: string } | { kind: 'rhel'; major: string } {
+  const os = ssh.os
+  const id = os?.id ?? ''
+  const like = os?.idLike ?? ''
+  const vid = os?.versionId ?? ''
+  if (id === 'ubuntu') {
+    if (!['20.04', '22.04', '24.04'].includes(vid)) throw new Error(`Microsoft publishes SQL Server 2022 packages for Ubuntu 20.04, 22.04 and 24.04 only (this server runs ${os?.prettyName}).`)
+    return { kind: 'ubuntu', ver: vid }
+  }
+  if (id === 'rhel' || id === 'rocky' || id === 'almalinux' || id === 'centos' || id === 'ol' || /\brhel\b/.test(like)) {
+    const major = vid.split('.')[0]
+    if (!['8', '9'].includes(major)) throw new Error(`Microsoft publishes SQL Server 2022 packages for RHEL 8 and 9 (and compatible distributions) only (this server runs ${os?.prettyName}).`)
+    return { kind: 'rhel', major }
+  }
+  throw new Error(`SQL Server on Linux is supported by Microsoft on Ubuntu 20.04/22.04/24.04 and RHEL 8/9 only, not on ${os?.prettyName}. Consider running it in Docker (mcr.microsoft.com/mssql/server).`)
+}
+
+async function installMssql(ssh: SshClient, serverId: string, h: TaskHandle, input: MssqlInstallInput): Promise<void> {
+  requireSystemd(ssh)
+  if (!input?.acceptEula) throw new Error('You must accept the Microsoft SQL Server EULA to install it')
+  if (!isStrongSqlPassword(input.saPassword ?? '')) throw new Error('The SA password must be 8–128 characters and contain upper-case, lower-case letters, digits and symbols')
+  const edition = String(input.edition ?? '').trim()
+  const isKey = /^[A-Z0-9]{5}(-[A-Z0-9]{5}){4}$/i.test(edition)
+  if (!isKey && !['Express', 'Developer', 'Evaluation', 'Standard', 'Enterprise', 'Web'].includes(edition)) throw new Error('Choose an edition or enter a 25-character product key')
+  const plat = mssqlPlatform(ssh)
+  const mem = await ssh.exec("awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo")
+  const memBytes = Number(mem.stdout.trim()) || 0
+  if (memBytes && memBytes < 1.9 * 1024 * 1024 * 1024) throw new Error(`SQL Server needs at least 2 GB of RAM; this server has ${(memBytes / 1024 / 1024 / 1024).toFixed(1)} GB.`)
+  h.log(`Platform: ${ssh.os?.prettyName}; RAM ${(memBytes / 1024 / 1024 / 1024).toFixed(1)} GB; edition ${isKey ? 'product key' : edition}.`)
+
+  if (plat.kind === 'ubuntu') {
+    h.log('Installing prerequisites (curl, gnupg) …')
+    await runPkg(ssh, installCmd(ssh, ['curl', 'gnupg', 'ca-certificates', 'apt-transport-https']), taskIo(h))
+    h.log('Adding the Microsoft signing key and repositories …')
+    await ssh.sudoRun('curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor --yes -o /usr/share/keyrings/microsoft-prod.gpg', { timeoutMs: 120000 })
+    const fix = (f: string): string => `grep -q signed-by ${f} || sed -i -E 's#^deb \\[#deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg #; s#^deb https#deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg] https#' ${f}`
+    await ssh.sudoRun(`curl -fsSL ${shq(`https://packages.microsoft.com/config/ubuntu/${plat.ver}/mssql-server-2022.list`)} -o /etc/apt/sources.list.d/mssql-server-2022.list && ${fix('/etc/apt/sources.list.d/mssql-server-2022.list')}`, { timeoutMs: 120000 })
+    await ssh.sudoRun(`curl -fsSL ${shq(`https://packages.microsoft.com/config/ubuntu/${plat.ver}/prod.list`)} -o /etc/apt/sources.list.d/mssql-release.list && ${fix('/etc/apt/sources.list.d/mssql-release.list')}`, { timeoutMs: 120000 })
+    h.log('Installing mssql-server …')
+    await runPkg(ssh, 'apt-get update -qq && apt-get install -y -qq mssql-server', taskIo(h))
+    h.log('Installing mssql-tools18 (sqlcmd) …')
+    await runPkg(ssh, 'apt-get install -y -qq mssql-tools18 unixodbc-dev', { ...taskIo(h), env: { ...pkgEnv(), ACCEPT_EULA: 'Y' } })
+  } else {
+    h.log('Adding the Microsoft repositories …')
+    await ssh.sudoRun(`curl -fsSL ${shq(`https://packages.microsoft.com/config/rhel/${plat.major}/mssql-server-2022.repo`)} -o /etc/yum.repos.d/mssql-server.repo && curl -fsSL ${shq(`https://packages.microsoft.com/config/rhel/${plat.major}/prod.repo`)} -o /etc/yum.repos.d/msprod.repo`, { timeoutMs: 120000 })
+    const pm = ssh.os?.pkgManager === 'yum' ? 'yum' : 'dnf'
+    h.log('Installing mssql-server …')
+    await runPkg(ssh, `${pm} install -y mssql-server`, taskIo(h))
+    h.log('Installing mssql-tools18 (sqlcmd) …')
+    await runPkg(ssh, `${pm} install -y mssql-tools18 unixODBC-devel`, { ...taskIo(h), env: { ...pkgEnv(), ACCEPT_EULA: 'Y' } })
+  }
+
+  h.log('Running non-interactive setup (mssql-conf setup) …')
+  // Password and edition travel in environment variables exported by the exec wrapper, never on the command line.
+  const setup = await ssh.exec('/opt/mssql/bin/mssql-conf -n setup accept-eula', {
+    sudo: true,
+    env: { MSSQL_SA_PASSWORD: input.saPassword, MSSQL_PID: isKey ? edition.toUpperCase() : edition, ACCEPT_EULA: 'Y' },
+    timeoutMs: 600000,
+    signal: h.signal,
+    onStdout: (c) => h.append(c),
+    onStderr: (c) => h.append(c)
+  })
+  if (setup.code !== 0) throw new Error(`mssql-conf setup failed (exit ${setup.code})`)
+  await ssh.sudoRun('systemctl enable --now mssql-server', { timeoutMs: 180000 })
+  await ssh.sudo(`mkdir -p ${MSSQL_BACKUP_DIR} && chown mssql:mssql ${MSSQL_BACKUP_DIR} && chmod 700 ${MSSQL_BACKUP_DIR}`)
+  const map = creds.get(serverId) ?? {}
+  map.mssql = { user: 'sa', password: input.saPassword }
+  creds.set(serverId, map)
+  mssqlPorts.set(serverId, 1433)
+  h.log('Waiting for SQL Server to accept connections …')
+  let ok = false
+  for (let i = 0; i < 12 && !ok; i++) {
+    await new Promise((r) => setTimeout(r, 5000))
+    const r = await mssqlExec(ssh, serverId, 'SELECT 1', { timeoutMs: 30000 }).catch(() => undefined)
+    ok = !!r && r.code === 0
+  }
+  if (!ok) throw new Error('SQL Server installed but did not accept a connection within 60 s; check "journalctl -u mssql-server".')
+  h.log('SQL Server is up (localhost:1433). SA credentials are kept in memory for this session.')
+}
+
 async function installSqlite(ssh: SshClient, h: TaskHandle): Promise<void> {
   const pm = ssh.os?.pkgManager
   const pkg = pm === 'apt' ? 'sqlite3' : 'sqlite'
@@ -731,8 +983,21 @@ async function listDatabases(engine: DbEngine, ssh: SshClient, serverId: string)
     ).catch(() => ({}) as Record<string, number>)
     return dbs.map((d) => ({ name: d.name, sizeBytes: d.sizeOnDisk, tables: counts[d.name] >= 0 ? counts[d.name] : undefined, system: SYSTEM_MONGO_DBS.has(d.name) }))
   }
+  if (engine === 'mssql') {
+    const g = await mssqlQuery(
+      ssh,
+      serverId,
+      'SELECT d.name, d.state_desc, d.recovery_model_desc, SUSER_SNAME(d.owner_sid), d.collation_name, ISNULL((SELECT SUM(CAST(mf.size AS bigint)) * 8192 FROM sys.master_files mf WHERE mf.database_id = d.database_id), 0) FROM sys.databases d ORDER BY d.name'
+    )
+    return g.rows.map((r) => ({ name: r[0] ?? '', state: r[1] ?? undefined, recoveryModel: r[2] ?? undefined, owner: r[3] ?? undefined, collation: r[4] ?? undefined, sizeBytes: num(r[5]), system: SYSTEM_MSSQL_DBS.has(r[0] ?? '') }))
+  }
   throw new Error('Not applicable for SQLite')
 }
+
+/** Dynamic T-SQL that lists (database, login, role) for every online user database. */
+const MSSQL_ROLE_MEMBERS_SQL = `DECLARE @s nvarchar(max) = N'';
+SELECT @s = @s + N' UNION ALL SELECT N''' + REPLACE(name, '''', '''''') + N''', l.name, r.name FROM ' + QUOTENAME(name) + N'.sys.database_role_members rm JOIN ' + QUOTENAME(name) + N'.sys.database_principals u ON u.principal_id = rm.member_principal_id JOIN ' + QUOTENAME(name) + N'.sys.database_principals r ON r.principal_id = rm.role_principal_id JOIN sys.server_principals l ON l.sid = u.sid' FROM sys.databases WHERE state = 0 AND database_id > 4;
+IF LEN(@s) > 0 BEGIN SET @s = STUFF(@s, 1, 11, N''); EXEC sp_executesql @s; END`
 
 function summarizeMysqlPrivs(global: string | null, perDb: string | null): string {
   const g = (global ?? '').split(',').map((s) => s.trim()).filter(Boolean)
@@ -813,7 +1078,36 @@ async function listUsers(engine: DbEngine, ssh: SshClient, serverId: string): Pr
       canLogin: true
     }))
   }
+  if (engine === 'mssql') {
+    const logins = await mssqlQuery(ssh, serverId, "SELECT l.name, l.type_desc, l.is_disabled, l.default_database_name, ISNULL(IS_SRVROLEMEMBER('sysadmin', l.name), 0) FROM sys.server_principals l WHERE l.type IN ('S','U') AND l.name NOT LIKE '##%' ORDER BY l.name")
+    const members = await mssqlQuery(ssh, serverId, MSSQL_ROLE_MEMBERS_SQL).catch(() => ({ columns: [], rows: [] }) as Grid)
+    const byLogin = new Map<string, string[]>()
+    for (const r of members.rows) {
+      const login = r[1] ?? ''
+      byLogin.set(login, [...(byLogin.get(login) ?? []), `${r[0]}: ${r[2]}`])
+    }
+    return logins.rows.map((r) => {
+      const name = r[0] ?? ''
+      const parts: string[] = []
+      if (r[4] === '1') parts.push('sysadmin')
+      parts.push(...(byLogin.get(name) ?? []))
+      if (r[2] === '1') parts.push('DISABLED')
+      return { user: name, host: r[3] ?? 'master', privileges: parts.join(' · ') || 'none', superuser: r[4] === '1', canLogin: r[2] !== '1', plugin: r[1] ?? undefined, roles: byLogin.get(name), system: name === 'sa' || name.startsWith('NT ') }
+    })
+  }
   throw new Error('Not applicable for SQLite')
+}
+
+/** T-SQL to (re)create the database user for a login and set its role membership in one database. */
+function mssqlGrantSql(user: string, db: string, privs: DbPrivileges): string {
+  const u = qBr(user)
+  const un = nStr(user)
+  const lines = [`USE ${qBr(db)};`, `IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = ${un}) CREATE USER ${u} FOR LOGIN ${u};`]
+  for (const role of ['db_owner', 'db_datareader', 'db_datawriter', 'db_ddladmin']) lines.push(`IF IS_ROLEMEMBER('${role}', ${un}) = 1 ALTER ROLE ${role} DROP MEMBER ${u};`)
+  if (privs === 'all') lines.push(`ALTER ROLE db_owner ADD MEMBER ${u};`)
+  else if (privs === 'readonly') lines.push(`ALTER ROLE db_datareader ADD MEMBER ${u};`)
+  else lines.push(`DROP USER ${u};`)
+  return lines.join('\n')
 }
 
 function mysqlGrantSql(privs: DbPrivileges, db: string | undefined, account: string): string[] {
@@ -882,6 +1176,15 @@ async function listTables(engine: DbEngine, ssh: SshClient, serverId: string, db
     }
     return tables
   }
+  if (engine === 'mssql') {
+    const g = await mssqlQuery(
+      ssh,
+      serverId,
+      "SELECT CASE WHEN s.name = 'dbo' THEN t.name ELSE s.name + '.' + t.name END, t.type, ISNULL(p.rc, 0), ISNULL(a.bytes, 0) FROM sys.objects t JOIN sys.schemas s ON s.schema_id = t.schema_id LEFT JOIN (SELECT object_id, SUM(row_count) AS rc FROM sys.dm_db_partition_stats WHERE index_id IN (0, 1) GROUP BY object_id) p ON p.object_id = t.object_id LEFT JOIN (SELECT object_id, SUM(CAST(used_page_count AS bigint)) * 8192 AS bytes FROM sys.dm_db_partition_stats GROUP BY object_id) a ON a.object_id = t.object_id WHERE t.type IN ('U', 'V') AND t.is_ms_shipped = 0 ORDER BY 1",
+      { db: assertIdent(db, 'database name') }
+    )
+    return g.rows.map((r) => ({ name: r[0] ?? '', type: (r[1] ?? '').trim() === 'V' ? 'view' : 'table', rows: num(r[2]), sizeBytes: num(r[3]) }))
+  }
   throw new Error('Use the Mongo collections handler for MongoDB')
 }
 
@@ -907,6 +1210,17 @@ async function columnsAndPk(engine: DbEngine, ssh: SshClient, serverId: string, 
     const pk = g.rows.filter((r) => Number(r[pi]) > 0).sort((a, b) => Number(a[pi]) - Number(b[pi])).map((r) => r[ni] ?? '')
     return { columns: cols, pk }
   }
+  if (engine === 'mssql') {
+    const [schema, name] = splitSchema(table, 'dbo')
+    const g = await mssqlQuery(
+      ssh,
+      serverId,
+      `SELECT c.COLUMN_NAME, CASE WHEN k.COLUMN_NAME IS NULL THEN 0 ELSE 1 END, ISNULL(k.ORDINAL_POSITION, 0) FROM INFORMATION_SCHEMA.COLUMNS c LEFT JOIN (SELECT kcu.COLUMN_NAME, kcu.TABLE_SCHEMA, kcu.TABLE_NAME, kcu.ORDINAL_POSITION FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME AND kcu.TABLE_SCHEMA = tc.TABLE_SCHEMA AND kcu.TABLE_NAME = tc.TABLE_NAME WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY') k ON k.COLUMN_NAME = c.COLUMN_NAME AND k.TABLE_SCHEMA = c.TABLE_SCHEMA AND k.TABLE_NAME = c.TABLE_NAME WHERE c.TABLE_SCHEMA = ${nStr(schema)} AND c.TABLE_NAME = ${nStr(name)} ORDER BY c.ORDINAL_POSITION`,
+      { db }
+    )
+    const pk = g.rows.filter((r) => r[1] === '1').sort((a, b) => Number(a[2]) - Number(b[2])).map((r) => r[0] ?? '')
+    return { columns: g.rows.map((r) => r[0] ?? ''), pk }
+  }
   throw new Error('Not applicable')
 }
 
@@ -918,10 +1232,18 @@ async function browseRows(engine: DbEngine, ssh: SshClient, serverId: string, db
   const dir = opts?.orderDir === 'desc' ? 'DESC' : 'ASC'
   const t = qTable(engine, table)
   const meta = await columnsAndPk(engine, ssh, serverId, db, table)
-  const orderBy = opts?.orderBy && meta.columns.includes(opts.orderBy) ? ` ORDER BY ${qIdent(engine, opts.orderBy)} ${dir}` : ''
+  let orderBy = opts?.orderBy && meta.columns.includes(opts.orderBy) ? ` ORDER BY ${qIdent(engine, opts.orderBy)} ${dir}` : ''
   const whereSql = where ? ` WHERE (${where})` : ''
-  const sql = `SELECT * FROM ${t}${whereSql}${orderBy} LIMIT ${limit} OFFSET ${offset};`
-  const countSql = `SELECT COUNT(*) FROM ${t}${whereSql};`
+  if (engine === 'mssql' && !orderBy) {
+    // OFFSET/FETCH needs an ORDER BY: default to the primary key, else the first column.
+    const cols = meta.pk.length ? meta.pk : meta.columns.slice(0, 1)
+    orderBy = cols.length ? ` ORDER BY ${cols.map((c) => qBr(c)).join(', ')}` : ''
+  }
+  const sql =
+    engine === 'mssql'
+      ? `SELECT * FROM ${t}${whereSql}${orderBy} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY;`
+      : `SELECT * FROM ${t}${whereSql}${orderBy} LIMIT ${limit} OFFSET ${offset};`
+  const countSql = engine === 'mssql' ? `SELECT COUNT_BIG(*) FROM ${t}${whereSql};` : `SELECT COUNT(*) FROM ${t}${whereSql};`
 
   let total: number | undefined
   let totalIsEstimate = false
@@ -938,6 +1260,14 @@ async function browseRows(engine: DbEngine, ssh: SshClient, serverId: string, db
       }
       if (!where && engine === 'postgres') {
         const e = await pgQuery(ssh, serverId, `SELECT reltuples::bigint FROM pg_class WHERE oid = ${sqlStr(qPgTable(table))}::regclass`, { db, skipHeader: true })
+        const est = num(e.rows[0]?.[0])
+        if (est !== undefined && est > 200000) {
+          totalIsEstimate = true
+          return est
+        }
+      }
+      if (!where && engine === 'mssql') {
+        const e = await mssqlQuery(ssh, serverId, `SELECT ISNULL(SUM(row_count), 0) FROM sys.dm_db_partition_stats WHERE object_id = OBJECT_ID(${nStr(qMsTable(table))}) AND index_id IN (0, 1)`, { db })
         const est = num(e.rows[0]?.[0])
         if (est !== undefined && est > 200000) {
           totalIsEstimate = true
@@ -982,6 +1312,16 @@ async function runSql(engine: DbEngine, ssh: SshClient, serverId: string, db: st
     return { ...grid, affected, ms: Date.now() - t0, message: msg || undefined, truncated: r.stdout.length >= maxBuffer }
   }
 
+  if (engine === 'mssql') {
+    const r = await mssqlExec(ssh, serverId, sql, { db, maxBuffer, timeoutMs: 300000 })
+    if (r.code !== 0) throwExec('mssql', r, 'sqlcmd failed')
+    const p = parseSqlcmd(r.stdout)
+    const grid = p.grids[0] ?? { columns: [], rows: [] }
+    const msg = [...p.messages, r.stderr.trim()].filter(Boolean).join('\n')
+    // "(N rows affected)" is also printed for SELECTs; only report it when there is no result grid.
+    return { ...grid, affected: grid.columns.length ? undefined : p.affected, ms: Date.now() - t0, message: msg || undefined, truncated: r.stdout.length >= maxBuffer }
+  }
+
   // MySQL and SQLite: append a marker query so we learn the affected row count of write statements.
   const body = sql.replace(/;\s*$/, '')
   const text = isRead ? body + ';' : engine === 'mysql' ? `${body};\nSELECT CONCAT('${MARK}', ROW_COUNT()) AS __sm;` : `${body};\nSELECT '${MARK}' || changes() AS __sm;`
@@ -1019,22 +1359,66 @@ export function register(ctx: Ctx): void {
       if (engine === 'mysql') await myQuery(ssh, serverId, 'SELECT 1', { skipHeader: true, timeoutMs: 20000 })
       else if (engine === 'postgres') await pgQuery(ssh, serverId, 'SELECT 1', { skipHeader: true, timeoutMs: 20000 })
       else if (engine === 'mongo') await mongoEval(ssh, serverId, "print('__SM__' + JSON.stringify(db.getSiblingDB('admin').runCommand({ ping: 1 })));", { timeoutMs: 20000 })
+      else if (engine === 'mssql') await mssqlQuery(ssh, serverId, 'SELECT 1', { timeoutMs: 30000 })
     }
     return { stored: !!user }
   })
 
-  ctx.handle('db:install', async (serverId: string, engineRaw: unknown, variant?: 'mysql' | 'mariadb') => {
+  ctx.handle('db:install', async (serverId: string, engineRaw: unknown, variant?: unknown) => {
     const engine = assertEngine(engineRaw)
     const ssh = ctx.ssh(serverId)
-    const title = engine === 'mysql' ? `Install ${variant === 'mariadb' ? 'MariaDB' : 'MySQL'}` : engine === 'postgres' ? 'Install PostgreSQL' : engine === 'mongo' ? 'Install MongoDB 8.0' : 'Install sqlite3'
+    const mysqlVariant = variant === 'mariadb' ? 'mariadb' : 'mysql'
+    const title = engine === 'mysql' ? `Install ${mysqlVariant === 'mariadb' ? 'MariaDB' : 'MySQL'}` : engine === 'postgres' ? 'Install PostgreSQL' : engine === 'mongo' ? 'Install MongoDB 8.0' : engine === 'mssql' ? 'Install SQL Server 2022' : 'Install sqlite3'
+    if (engine === 'mssql') {
+      // Validate up-front so the dialog gets an immediate error instead of a failed task.
+      const input = (variant ?? {}) as MssqlInstallInput
+      if (!input.acceptEula) throw new Error('You must accept the Microsoft SQL Server EULA to install it')
+      if (!isStrongSqlPassword(input.saPassword ?? '')) throw new Error('The SA password must be 8–128 characters and contain upper-case, lower-case letters, digits and symbols')
+      mssqlPlatform(ssh)
+    }
     const { id } = ctx.tasks.start(title, serverId, async (h) => {
-      if (engine === 'mysql') await installMysqlFamily(ssh, h, variant === 'mariadb' ? 'mariadb' : 'mysql')
+      if (engine === 'mysql') await installMysqlFamily(ssh, h, mysqlVariant)
       else if (engine === 'postgres') await installPostgres(ssh, h)
       else if (engine === 'mongo') await installMongo(ssh, h)
+      else if (engine === 'mssql') await installMssql(ssh, serverId, h, variant as MssqlInstallInput)
       else await installSqlite(ssh, h)
-      ctx.audit(serverId, 'db.install', `${engine}${variant ? ' ' + variant : ''}`)
+      ctx.audit(serverId, 'db.install', `${engine}${engine === 'mysql' ? ' ' + mysqlVariant : engine === 'mssql' ? ' ' + String((variant as MssqlInstallInput).edition) : ''}`)
     })
     return id
+  })
+
+  // ---------------- SQL Server settings (mssql-conf) ----------------
+  ctx.handle('db:mssql:configure', async (serverId: string, patch: { port?: number; memoryLimitMb?: number | null; agentEnabled?: boolean }) => {
+    const ssh = ctx.ssh(serverId)
+    requireSystemd(ssh)
+    const cmds: string[] = []
+    const changes: string[] = []
+    if (patch?.port !== undefined) {
+      const p = Math.floor(Number(patch.port))
+      if (!Number.isInteger(p) || p < 1 || p > 65535) throw new Error('Invalid port')
+      cmds.push(`/opt/mssql/bin/mssql-conf set network.tcpport ${p}`)
+      changes.push(`port=${p}`)
+    }
+    if (patch?.memoryLimitMb !== undefined) {
+      if (patch.memoryLimitMb === null) {
+        cmds.push('/opt/mssql/bin/mssql-conf unset memory.memorylimitmb')
+        changes.push('memorylimitmb=default')
+      } else {
+        const mb = Math.floor(Number(patch.memoryLimitMb))
+        if (!Number.isInteger(mb) || mb < 2048) throw new Error('Memory limit must be at least 2048 MB')
+        cmds.push(`/opt/mssql/bin/mssql-conf set memory.memorylimitmb ${mb}`)
+        changes.push(`memorylimitmb=${mb}`)
+      }
+    }
+    if (patch?.agentEnabled !== undefined) {
+      cmds.push(`/opt/mssql/bin/mssql-conf set sqlagent.enabled ${patch.agentEnabled ? 'true' : 'false'}`)
+      changes.push(`sqlagent=${patch.agentEnabled}`)
+    }
+    if (!cmds.length) return
+    for (const c of cmds) await ssh.sudoRun(c, { timeoutMs: 60000 })
+    await ssh.sudoRun('systemctl restart mssql-server', { timeoutMs: 180000 })
+    if (patch?.port !== undefined) mssqlPorts.set(serverId, Math.floor(Number(patch.port)))
+    ctx.audit(serverId, 'db.mssql.configure', changes.join(' '))
   })
 
   ctx.handle('db:service', async (serverId: string, engineRaw: unknown, action: DbServiceAction) => {
@@ -1110,7 +1494,11 @@ export function register(ctx: Ctx): void {
     } else if (engine === 'mongo') {
       const name = assertMongoName(nameRaw, 'database name')
       // MongoDB creates databases lazily; create a placeholder collection so it shows up.
-      await mongoEval(ssh, serverId, `var d = db.getSiblingDB(${JSON.stringify(name)}); d.createCollection('_servermate_init'); d.getCollection('_servermate_init').drop(); d.createCollection('default'); print('__SM__' + JSON.stringify({ ok: 1 }));`)
+      await mongoEval(ssh, serverId, `var d = db.getSiblingDB(${JSON.stringify(name)}); d.createCollection('_servermate_init'); d.getSiblingDB(${JSON.stringify(name)}).getCollection('_servermate_init').drop(); d.createCollection('default'); print('__SM__' + JSON.stringify({ ok: 1 }));`)
+    } else if (engine === 'mssql') {
+      const name = assertIdent(nameRaw, 'database name')
+      const coll = opts?.collation ? ` COLLATE ${assertIdent(opts.collation, 'collation')}` : ''
+      await mssqlQuery(ssh, serverId, `CREATE DATABASE ${qBr(name)}${coll};`)
     } else throw new Error('Not applicable for SQLite')
     ctx.audit(serverId, 'db.createDatabase', `${engine} ${nameRaw}`)
   })
@@ -1135,6 +1523,10 @@ export function register(ctx: Ctx): void {
       const name = assertMongoName(nameRaw, 'database name')
       if (SYSTEM_MONGO_DBS.has(name)) throw new Error('Refusing to drop a system database')
       await mongoEval(ssh, serverId, `print('__SM__' + JSON.stringify(db.getSiblingDB(${JSON.stringify(name)}).dropDatabase()));`)
+    } else if (engine === 'mssql') {
+      const name = assertIdent(nameRaw, 'database name')
+      if (SYSTEM_MSSQL_DBS.has(name.toLowerCase())) throw new Error('Refusing to drop a system database')
+      await mssqlQuery(ssh, serverId, `ALTER DATABASE ${qBr(name)} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;\nDROP DATABASE ${qBr(name)};`)
     } else throw new Error('Not applicable for SQLite')
     ctx.audit(serverId, 'db.dropDatabase', `${engine} ${nameRaw}`)
   })
@@ -1159,6 +1551,13 @@ export function register(ctx: Ctx): void {
       const u = assertMongoName(input.user, 'user name')
       const roles = mongoRoles(privs, input.database || undefined)
       await mongoEval(ssh, serverId, `print('__SM__' + JSON.stringify(db.getSiblingDB('admin').createUser({ user: ${JSON.stringify(u)}, pwd: ${JSON.stringify(input.password)}, roles: ${JSON.stringify(roles)} })));`)
+    } else if (engine === 'mssql') {
+      const u = assertIdent(input.user, 'login name')
+      if (!isStrongSqlPassword(input.password)) throw new Error('SQL Server requires a password of at least 8 characters with upper-case, lower-case letters, digits and symbols')
+      const defDb = input.database ? assertIdent(input.database, 'database name') : undefined
+      const stmts = [`CREATE LOGIN ${qBr(u)} WITH PASSWORD = ${nStr(input.password)}, CHECK_POLICY = ON${defDb ? `, DEFAULT_DATABASE = ${qBr(defDb)}` : ''};`]
+      if (defDb && privs !== 'none') stmts.push(mssqlGrantSql(u, defDb, privs))
+      await mssqlQuery(ssh, serverId, stmts.join('\n'))
     } else throw new Error('Not applicable for SQLite')
     ctx.audit(serverId, 'db.createUser', `${engine} ${input.user}`)
   })
@@ -1170,7 +1569,10 @@ export function register(ctx: Ctx): void {
     if (engine === 'mysql') await myQuery(ssh, serverId, `ALTER USER ${myAccount(user, host ?? 'localhost')} IDENTIFIED BY ${myStr(password)};\nFLUSH PRIVILEGES;`)
     else if (engine === 'postgres') await pgQuery(ssh, serverId, `ALTER ROLE ${qDq(assertIdent(user, 'user name'))} PASSWORD ${sqlStr(password)};`)
     else if (engine === 'mongo') await mongoEval(ssh, serverId, `db.getSiblingDB(${JSON.stringify(assertMongoName(host || 'admin', 'auth database'))}).changeUserPassword(${JSON.stringify(assertMongoName(user, 'user name'))}, ${JSON.stringify(password)}); print('__SM__' + JSON.stringify({ ok: 1 }));`)
-    else throw new Error('Not applicable for SQLite')
+    else if (engine === 'mssql') {
+      if (!isStrongSqlPassword(password)) throw new Error('SQL Server requires a password of at least 8 characters with upper-case, lower-case letters, digits and symbols')
+      await mssqlQuery(ssh, serverId, `ALTER LOGIN ${qBr(assertIdent(user, 'login name'))} WITH PASSWORD = ${nStr(password)};`)
+    } else throw new Error('Not applicable for SQLite')
     // Keep the in-memory admin credential in sync when the operator changes their own password.
     const c = getCred(serverId, engine)
     if (c && c.user === user) c.password = password
@@ -1189,6 +1591,15 @@ export function register(ctx: Ctx): void {
       await pgQuery(ssh, serverId, `DROP ROLE ${qDq(u)};`)
     } else if (engine === 'mongo') {
       await mongoEval(ssh, serverId, `print('__SM__' + JSON.stringify(db.getSiblingDB(${JSON.stringify(assertMongoName(host || 'admin', 'auth database'))}).dropUser(${JSON.stringify(assertMongoName(user, 'user name'))})));`)
+    } else if (engine === 'mssql') {
+      const u = assertIdent(user, 'login name')
+      if (u.toLowerCase() === 'sa') throw new Error('Refusing to drop sa')
+      // Drop the database users mapped to this login in every online user database, then the login.
+      const sql = `DECLARE @s nvarchar(max) = N'';
+SELECT @s = @s + N'IF EXISTS (SELECT 1 FROM ' + QUOTENAME(name) + N'.sys.database_principals WHERE name = ${nStr(u).replace(/'/g, "''")}) EXEC(N''USE ' + QUOTENAME(name) + N'; DROP USER ${qBr(u).replace(/'/g, "''")};''); ' FROM sys.databases WHERE state = 0 AND database_id > 4;
+IF LEN(@s) > 0 EXEC sp_executesql @s;
+DROP LOGIN ${qBr(u)};`
+      await mssqlQuery(ssh, serverId, sql)
     } else throw new Error('Not applicable for SQLite')
     ctx.audit(serverId, 'db.dropUser', `${engine} ${user}`)
   })
@@ -1221,6 +1632,8 @@ export function register(ctx: Ctx): void {
         serverId,
         `var ad = db.getSiblingDB(${JSON.stringify(input.host || 'admin')}); var cur = ad.getUser(${JSON.stringify(u)}); var old = (cur && cur.roles ? cur.roles : []).filter(function (r) { return r.db === ${JSON.stringify(d)}; }); if (old.length) ad.revokeRolesFromUser(${JSON.stringify(u)}, old); if (${JSON.stringify(roles)}.length) ad.grantRolesToUser(${JSON.stringify(u)}, ${JSON.stringify(roles)}); print('__SM__' + JSON.stringify({ ok: 1 }));`
       )
+    } else if (engine === 'mssql') {
+      await mssqlQuery(ssh, serverId, mssqlGrantSql(assertIdent(input.user, 'login name'), assertIdent(input.database, 'database name'), privs))
     } else throw new Error('Not applicable for SQLite')
     ctx.audit(serverId, 'db.grant', `${engine} ${input.user} ${privs} on ${input.database}`)
   })
@@ -1228,18 +1641,22 @@ export function register(ctx: Ctx): void {
   // ---------------- backups ----------------
   ctx.handle('db:backups', async (serverId: string): Promise<DbBackup[]> => {
     const ssh = ctx.ssh(serverId)
-    const r = await ssh.sudo(`mkdir -p ${DB_BACKUPS_DIR} && chmod 700 ${DB_BACKUPS_DIR} && find ${DB_BACKUPS_DIR} -maxdepth 1 -type f -printf '%f\\t%s\\t%T@\\n'`)
+    const r = await ssh.sudo(
+      `mkdir -p ${DB_BACKUPS_DIR} && chmod 700 ${DB_BACKUPS_DIR} && find ${DB_BACKUPS_DIR} -maxdepth 1 -type f -printf '%p\\t%s\\t%T@\\n'; [ -d ${MSSQL_BACKUP_DIR} ] && find ${MSSQL_BACKUP_DIR} -maxdepth 1 -type f -name '*.bak' -printf '%p\\t%s\\t%T@\\n'; true`
+    )
     if (r.code !== 0) throw new Error(r.stderr.trim() || 'Could not list backups')
     const out: DbBackup[] = []
     for (const line of splitLines(r.stdout)) {
-      const [name, size, mtime] = line.split('\t')
-      if (!name) continue
+      const [file, size, mtime] = line.split('\t')
+      if (!file) continue
+      const name = file.slice(file.lastIndexOf('/') + 1)
       const m = name.match(BACKUP_RE)
+      const ms = name.match(MSSQL_BACKUP_RE)
       out.push({
-        file: `${DB_BACKUPS_DIR}/${name}`,
+        file,
         name,
-        engine: m ? (m[3] === 'pg' ? 'postgres' : (m[3] as DbEngine)) : undefined,
-        database: m ? m[1] : undefined,
+        engine: m ? (m[3] === 'pg' ? 'postgres' : (m[3] as DbEngine)) : ms ? 'mssql' : name.endsWith('.bak') ? 'mssql' : undefined,
+        database: m ? m[1] : ms ? ms[1] : undefined,
         sizeBytes: Number(size) || 0,
         mtime: Math.round((Number(mtime) || 0) * 1000)
       })
@@ -1253,6 +1670,22 @@ export function register(ctx: Ctx): void {
     const db = engine === 'mongo' ? assertMongoName(dbRaw, 'database name') : assertIdent(dbRaw, 'database name')
     const path = backupPath(engine, db)
     const { id } = ctx.tasks.start(`Backup ${db} (${engineLabel(engine)})`, serverId, async (h) => {
+      if (engine === 'mssql') {
+        // The server process (user mssql) writes the file itself, so the directory must belong to mssql.
+        await ssh.sudoRun(`mkdir -p ${MSSQL_BACKUP_DIR} && chown mssql:mssql ${MSSQL_BACKUP_DIR} && chmod 700 ${MSSQL_BACKUP_DIR}`)
+        h.log(`BACKUP DATABASE ${db} TO DISK = ${path} …`)
+        const sql = (compression: boolean): string => `BACKUP DATABASE ${qBr(db)} TO DISK = ${nStr(path)} WITH ${compression ? 'COMPRESSION, ' : ''}INIT, STATS = 10;`
+        let r = await mssqlExec(ssh, serverId, sql(true), { timeoutMs: 0, ...taskIo(h) })
+        if (r.code !== 0 && /not supported on this edition|COMPRESSION/i.test(r.stderr + r.stdout)) {
+          h.log('Backup compression is not available in this edition; retrying without COMPRESSION …')
+          r = await mssqlExec(ssh, serverId, sql(false), { timeoutMs: 0, ...taskIo(h) })
+        }
+        if (r.code !== 0) throwExec('mssql', r, 'BACKUP DATABASE failed')
+        const sz = await ssh.sudo(`stat -c %s ${shq(path)}`)
+        h.log(`Done: ${path} (${Math.round((Number(sz.stdout) || 0) / 1024)} KB). Download it from the Files module.`)
+        ctx.audit(serverId, 'db.backup', `mssql ${db} -> ${path}`)
+        return
+      }
       await ssh.sudoRun(`mkdir -p ${DB_BACKUPS_DIR} && chmod 700 ${DB_BACKUPS_DIR}`)
       h.log(`Dumping ${db} to ${path} …`)
       let cmd: string
@@ -1314,6 +1747,37 @@ export function register(ctx: Ctx): void {
         if (!orig) h.log('Could not derive the original database name from the file name; restoring with original namespaces.')
         const r = await ssh.exec(`mongorestore${auth} --archive=${shq(file)} --gzip --drop${ns}`, { sudo: true, timeoutMs: 0, ...taskIo(h) })
         if (r.code !== 0) throw new Error(`Restore failed (exit ${r.code})`)
+      } else if (engine === 'mssql') {
+        if (!file.startsWith(MSSQL_BACKUP_DIR + '/')) throw new Error(`SQL Server can only restore .bak files from ${MSSQL_BACKUP_DIR}`)
+        const orig = file.split('/').pop()?.match(MSSQL_BACKUP_RE)?.[1]
+        h.log('Reading the file list from the backup …')
+        const fl = await mssqlQuery(ssh, serverId, `RESTORE FILELISTONLY FROM DISK = ${nStr(file)};`, { timeoutMs: 300000 })
+        const li = fl.columns.indexOf('LogicalName')
+        const pi = fl.columns.indexOf('PhysicalName')
+        const ti = fl.columns.indexOf('Type')
+        const exists = await mssqlQuery(ssh, serverId, `SELECT COUNT(*) FROM sys.databases WHERE name = ${nStr(db)};`)
+        const dbExists = (exists.rows[0]?.[0] ?? '0') !== '0'
+        // Restoring under a different name needs new physical file names, otherwise they collide with the source database.
+        let move = ''
+        if (orig !== db && li >= 0 && pi >= 0) {
+          move = fl.rows
+            .map((r, i) => {
+              const phys = r[pi] ?? ''
+              const ext = (r[ti] ?? '').trim() === 'L' ? 'ldf' : phys.includes('.') ? phys.slice(phys.lastIndexOf('.') + 1).replace(/[^A-Za-z0-9]/g, '') || 'mdf' : 'mdf'
+              return `, MOVE ${nStr(r[li] ?? '')} TO ${nStr(`/var/opt/mssql/data/${db}_${i}.${ext}`)}`
+            })
+            .join('')
+        }
+        const sql = [
+          dbExists ? `ALTER DATABASE ${qBr(db)} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;` : '',
+          `RESTORE DATABASE ${qBr(db)} FROM DISK = ${nStr(file)} WITH REPLACE, RECOVERY, STATS = 10${move};`,
+          `ALTER DATABASE ${qBr(db)} SET MULTI_USER;`
+        ]
+          .filter(Boolean)
+          .join('\n')
+        h.log(`RESTORE DATABASE ${db} FROM DISK = ${file}${move ? ' (files relocated)' : ''} …`)
+        const r = await mssqlExec(ssh, serverId, sql, { timeoutMs: 0, ...taskIo(h) })
+        if (r.code !== 0) throwExec('mssql', r, 'RESTORE DATABASE failed')
       } else throw new Error('Not applicable for SQLite')
       h.log('Restore finished.')
       ctx.audit(serverId, 'db.restore', `${engine} ${file} -> ${db}`)
@@ -1408,7 +1872,9 @@ export function register(ctx: Ctx): void {
           ? await myExec(ssh, serverId, text, { db, timeoutMs: 0, ...taskIo(h) })
           : engine === 'postgres'
             ? await pgExec(ssh, serverId, text, { db, timeoutMs: 0, ...taskIo(h) })
-            : await sqliteExec(ssh, db, text, { timeoutMs: 0, signal: h.signal })
+            : engine === 'mssql'
+              ? await mssqlExec(ssh, serverId, text, { db, timeoutMs: 0, ...taskIo(h) })
+              : await sqliteExec(ssh, db, text, { timeoutMs: 0, signal: h.signal })
       if (r.code !== 0) throw new Error(`Import failed (exit ${r.code}): ${r.stderr.trim().split('\n').slice(-5).join('\n')}`)
       if (engine === 'sqlite' && r.stdout) h.append(r.stdout)
       h.log('Import finished.')

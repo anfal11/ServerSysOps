@@ -18,6 +18,7 @@ import {
   Settings,
   Shield,
   ShieldCheck,
+  Smartphone,
   SquareTerminal,
   Terminal as TerminalIcon,
   Users as UsersIcon,
@@ -30,6 +31,7 @@ import { NAV, PAGES } from '@/pages'
 import Connections from '@/pages/Connections'
 import TasksDrawer from '@/components/TasksDrawer'
 import SettingsModal from '@/components/SettingsModal'
+import AuthPromptModal from '@/components/AuthPromptModal'
 import { ConfirmHost, Toaster, Loading, Button, Spinner, Dot } from '@/components/ui'
 import { cls } from '@/lib/format'
 
@@ -45,6 +47,7 @@ const ICONS: Record<PageId, React.ReactNode> = {
   processes: <Activity />,
   users: <UsersIcon />,
   firewall: <Shield />,
+  twofactor: <Smartphone />,
   security: <ShieldCheck />,
   logs: <FileText />,
   snippets: <TerminalIcon />,
@@ -69,6 +72,7 @@ export default function App(): React.JSX.Element {
       <TasksDrawer />
       <Toaster />
       <ConfirmHost />
+      <AuthPromptModal />
     </div>
   )
 }

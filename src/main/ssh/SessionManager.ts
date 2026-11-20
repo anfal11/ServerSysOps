@@ -14,6 +14,8 @@ export class SessionManager extends EventEmitter {
   private states = new Map<string, ConnectionState>()
   private reconnectTimers = new Map<string, NodeJS.Timeout>()
   private manualDisconnect = new Set<string>()
+  /** Set by core: asks the user to answer interactive login prompts (2FA codes etc.). */
+  askAuth?: (serverId: string, name: string, instructions: string, prompts: { prompt: string; echo: boolean }[], prefilled: (string | null)[]) => Promise<string[] | null>
 
   getState(serverId: string): ConnectionState {
     return this.states.get(serverId) ?? { serverId, status: 'disconnected' }
@@ -56,6 +58,7 @@ export class SessionManager extends EventEmitter {
     }
 
     const client = new SshClient(profile, getSecrets(serverId), jump)
+    if (this.askAuth) client.promptHandler = (name, instr, prompts, prefilled) => this.askAuth!(serverId, name, instr, prompts, prefilled)
     this.clients.set(serverId, client)
     this.setState(serverId, { status: 'connecting', error: undefined, errorCode: undefined, hostKey: undefined })
     client.on('close', () => this.onClose(serverId, profile))

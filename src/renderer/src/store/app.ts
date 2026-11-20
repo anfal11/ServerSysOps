@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AlertEvent, AppSettings, ConnectionState, ServerProfile, TaskInfo } from '@shared/types'
+import type { AlertEvent, AppSettings, AuthPrompt, ConnectionState, ServerProfile, TaskInfo } from '@shared/types'
 import { DEFAULT_SETTINGS } from '@shared/types'
 import { api } from '@/lib/api'
 import { applyTheme } from '@/lib/themes'
@@ -16,6 +16,7 @@ export type PageId =
   | 'processes'
   | 'users'
   | 'firewall'
+  | 'twofactor'
   | 'security'
   | 'logs'
   | 'snippets'
@@ -45,6 +46,8 @@ interface AppState {
   appVersion: string
   /** Commands queued for the Terminal page (consumed when it mounts / is visible). */
   pendingTerminal: Record<string, string[]>
+  /** Interactive SSH login prompts waiting for the user (2FA codes etc.). */
+  authPrompts: AuthPrompt[]
 
   init(): Promise<void>
   refreshServers(): Promise<void>
@@ -79,6 +82,7 @@ export const useApp = create<AppState>((set, get) => ({
   toasts: [],
   appVersion: '',
   pendingTerminal: {},
+  authPrompts: [],
 
   async init() {
     const [servers, states, tasks, settings, info, alerts] = await Promise.all([
@@ -108,6 +112,10 @@ export const useApp = create<AppState>((set, get) => ({
         })
         if (e.task.status === 'failed') get().toast({ kind: 'error', title: `Task failed: ${e.task.title}`, detail: e.task.error })
         else if (e.task.status === 'done') get().toast({ kind: 'success', title: `Done: ${e.task.title}` })
+      } else if (e.type === 'auth-prompt') {
+        set((st) => ({ authPrompts: [...st.authPrompts.filter((p) => p.requestId !== e.prompt.requestId), e.prompt] }))
+      } else if (e.type === 'auth-prompt-done') {
+        set((st) => ({ authPrompts: st.authPrompts.filter((p) => p.requestId !== e.requestId) }))
       } else if (e.type === 'alert') {
         set((st) => ({ alerts: [e.alert, ...st.alerts].slice(0, 500) }))
         get().toast({ kind: 'warn', title: `${e.alert.serverName}: ${e.alert.message}` })

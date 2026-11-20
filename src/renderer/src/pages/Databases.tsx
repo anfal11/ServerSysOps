@@ -14,6 +14,7 @@ import {
   Power,
   RefreshCw,
   RotateCw,
+  Settings,
   Shield,
   Square,
   Table2,
@@ -69,23 +70,27 @@ import type {
   DbUser,
   MongoCollection,
   MongoDocsResult,
+  MssqlInstallInput,
   SqliteOpenResult
 } from '@shared/modules/databases'
-import { DB_ENGINE_LABEL, DB_IMPORT_MAX_BYTES } from '@shared/modules/databases'
+import { DB_ENGINE_LABEL, DB_IMPORT_MAX_BYTES, MSSQL_BACKUP_DIR, MSSQL_EDITIONS, MSSQL_EULA_URL, isStrongSqlPassword } from '@shared/modules/databases'
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
 type Section = 'overview' | 'databases' | 'users' | 'backups' | 'browse' | 'sql'
-type ServerEngine = 'mysql' | 'postgres' | 'mongo'
+type ServerEngine = 'mysql' | 'postgres' | 'mongo' | 'mssql'
 
 const ENGINE_TABS: { id: DbEngine; label: string }[] = [
   { id: 'mysql', label: 'MySQL / MariaDB' },
   { id: 'postgres', label: 'PostgreSQL' },
   { id: 'mongo', label: 'MongoDB' },
+  { id: 'mssql', label: 'SQL Server' },
   { id: 'sqlite', label: 'SQLite client' }
 ]
+
+const CLIENT_NAME: Record<ServerEngine, string> = { mysql: 'mysql / mariadb', postgres: 'psql', mongo: 'mongosh', mssql: 'sqlcmd' }
 
 function isAuthError(e: unknown): boolean {
   return e instanceof ApiError && e.code === 'DB_AUTH'
@@ -109,9 +114,14 @@ function downloadText(name: string, text: string, type = 'text/csv;charset=utf-8
 
 function genPassword(len = 20): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!#%+-_=.'
-  const buf = new Uint32Array(len)
-  crypto.getRandomValues(buf)
-  return Array.from(buf, (n) => chars[n % chars.length]).join('')
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const buf = new Uint32Array(len)
+    crypto.getRandomValues(buf)
+    const pw = Array.from(buf, (n) => chars[n % chars.length]).join('')
+    // Always satisfy the strictest policy (SQL Server): upper + lower + digit + symbol.
+    if (isStrongSqlPassword(pw)) return pw
+  }
+  return 'Aa1!' + genPassword(len - 4)
 }
 
 function engineName(e: DbEngine, st?: DbEngineStatus): string {
@@ -127,7 +137,7 @@ function DbErrorBox({ error, onRetry, onCredentials }: { error: unknown; onRetry
         <div className="flex items-start gap-3">
           <div className="flex-1 whitespace-pre-wrap break-words">
             <b>Admin access refused.</b> {errMsg(error)}
-            <div className="mt-1 text-amber-200/70">Local socket authentication did not work. Enter an admin user and password; they are kept in memory only while the app runs.</div>
+            <div className="mt-1 text-amber-200/70">Enter an admin login and password; they are kept in memory only while the app runs and are passed to the client through its environment, never on a command line.</div>
           </div>
           <Button size="xs" icon={<KeyRound size={11} />} onClick={onCredentials}>
             Set credentials
@@ -159,6 +169,7 @@ export default function Databases({ serverId }: PageProps): React.JSX.Element {
     if (st.mysql.installed) parts.push(`${engineName('mysql', st.mysql)} ${st.mysql.version ?? ''}`.trim())
     if (st.postgres.installed) parts.push(`PostgreSQL ${st.postgres.version ?? ''}`.trim())
     if (st.mongo.installed) parts.push(`MongoDB ${st.mongo.version ?? ''}`.trim())
+    if (st.mssql.installed) parts.push(`SQL Server ${st.mssql.version ?? ''}`.trim())
     return parts.length ? parts.join(' · ') : 'No database server installed'
   }, [st])
 
@@ -282,6 +293,7 @@ function InstallPanel({ serverId, engine, summary }: { serverId: string; engine:
     const id = await run(() => api.call<string>('db:install', serverId, engine, variant))
     if (id) toastInfo(`Installing ${variant === 'mariadb' ? 'MariaDB' : engineName(engine)}…`, 'Follow the progress in the Tasks drawer. The status refreshes automatically.')
   }
+  if (engine === 'mssql') return <MssqlInstallPanel serverId={serverId} summary={summary} />
   const descr =
     engine === 'mysql'
       ? `MySQL is not installed. Install MySQL or MariaDB (a compatible community fork) from the distribution's repositories (${summary.os.prettyName}).`
@@ -317,6 +329,88 @@ function InstallPanel({ serverId, engine, summary }: { serverId: string; engine:
   )
 }
 
+function MssqlInstallPanel({ serverId, summary }: { serverId: string; summary: DbStatusSummary }): React.JSX.Element {
+  const [edition, setEdition] = useState('Express')
+  const [productKey, setProductKey] = useState('')
+  const [pw, setPw] = useState(genPassword())
+  const [showPw, setShowPw] = useState(false)
+  const [eula, setEula] = useState(false)
+  const { run, busy } = useAction()
+  const os = summary.os
+  const major = os.versionId.split('.')[0]
+  const rhelLike = ['rhel', 'rocky', 'almalinux', 'centos', 'ol'].includes(os.id)
+  const supported = (os.id === 'ubuntu' && ['20.04', '22.04', '24.04'].includes(os.versionId)) || (rhelLike && ['8', '9'].includes(major))
+  const lowMem = summary.os.memTotalBytes !== undefined && summary.os.memTotalBytes < 1.9 * 1024 ** 3
+  const useKey = edition === '__key'
+  const keyOk = /^[A-Z0-9]{5}(-[A-Z0-9]{5}){4}$/i.test(productKey.trim())
+  const pwOk = isStrongSqlPassword(pw)
+  const valid = supported && !lowMem && eula && pwOk && (!useKey || keyOk)
+  const install = async (): Promise<void> => {
+    const input: MssqlInstallInput = { saPassword: pw, edition: useKey ? productKey.trim().toUpperCase() : edition, acceptEula: eula }
+    const id = await run(() => api.call<string>('db:install', serverId, 'mssql', input))
+    if (id) toastInfo('Installing SQL Server 2022…', 'Packages, mssql-tools18 and the non-interactive setup run as a task. The SA password is kept in memory for this session.')
+  }
+  return (
+    <Card>
+      <div className="flex flex-col gap-4 max-w-2xl mx-auto py-4">
+        <div className="text-center">
+          <div className="text-dim mb-2 flex justify-center">
+            <Database size={32} />
+          </div>
+          <div className="font-medium text-[14px]">SQL Server is not installed</div>
+          <div className="text-muted text-xs mt-1">
+            Installs Microsoft SQL Server 2022 and the sqlcmd tools from packages.microsoft.com, then runs <code>mssql-conf setup</code> non-interactively. Supported by Microsoft on Ubuntu 20.04 / 22.04 / 24.04 and RHEL 8 / 9 (and compatible) only; needs at least 2 GB of RAM.
+          </div>
+        </div>
+        {!supported && <Callout kind="danger">{os.prettyName} is not a platform Microsoft publishes SQL Server packages for. Use Ubuntu 20.04/22.04/24.04 or RHEL 8/9 (Rocky, Alma, Oracle Linux), or run SQL Server in Docker.</Callout>}
+        {lowMem && <Callout kind="danger">This server has {fmtBytes(summary.os.memTotalBytes)} of RAM; SQL Server refuses to start with less than 2 GB.</Callout>}
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Edition" className={useKey ? 'col-span-1' : 'col-span-2'}>
+            <Select value={edition} onChange={(e) => setEdition(e.target.value)}>
+              {MSSQL_EDITIONS.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.label}
+                </option>
+              ))}
+              <option value="__key">I have a product key…</option>
+            </Select>
+          </Field>
+          {useKey && (
+            <Field label="Product key" hint="25 characters, XXXXX-XXXXX-XXXXX-XXXXX-XXXXX">
+              <Input value={productKey} onChange={(e) => setProductKey(e.target.value)} mono placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" />
+            </Field>
+          )}
+          <Field label="SA password" className="col-span-2" hint={pwOk ? 'Strong enough for the SQL Server password policy.' : 'At least 8 characters with upper-case, lower-case letters, digits and symbols — SQL Server rejects weaker passwords.'}>
+            <div className="flex gap-2">
+              <Input type={showPw ? 'text' : 'password'} value={pw} onChange={(e) => setPw(e.target.value)} mono autoComplete="off" />
+              <Button onClick={() => setShowPw((s) => !s)}>{showPw ? 'Hide' : 'Show'}</Button>
+              <Button onClick={() => setPw(genPassword())}>Generate</Button>
+            </div>
+          </Field>
+        </div>
+        <Checkbox
+          checked={eula}
+          onChange={setEula}
+          label={
+            <span>
+              I accept the{' '}
+              <button type="button" className="text-accent hover:underline" onClick={(e) => { e.stopPropagation(); api.openExternal(MSSQL_EULA_URL) }}>
+                Microsoft SQL Server license terms
+              </button>{' '}
+              (and the ODBC / mssql-tools EULA)
+            </span>
+          }
+        />
+        <div className="flex justify-center">
+          <Button variant="primary" icon={<Download size={13} />} loading={busy} disabled={!valid} onClick={install}>
+            Install SQL Server 2022
+          </Button>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /* Overview / status                                                   */
 /* ------------------------------------------------------------------ */
@@ -332,6 +426,7 @@ function EngineStatus({ serverId, engine, st, reload, onCredentials }: { serverI
   const name = engineName(engine, st)
   const rows: [React.ReactNode, React.ReactNode][] = [
     ['Version', st.version ?? '—'],
+    ...(engine === 'mssql' ? ([['Edition', st.edition ?? '—']] as [React.ReactNode, React.ReactNode][]) : []),
     [
       'Status',
       <span className="flex items-center gap-2">
@@ -344,7 +439,7 @@ function EngineStatus({ serverId, engine, st, reload, onCredentials }: { serverI
     ['Port', st.port ?? '—'],
     ['Bind address', <span className="font-mono text-xs">{st.bindAddress ?? '—'}</span>],
     ['Size on disk', fmtBytes(st.sizeBytes)],
-    ['Admin access', st.authOk === undefined ? '—' : st.authOk ? <span className="text-green-300">{st.usingCredentials ? 'stored credentials' : engine === 'postgres' ? 'peer auth as postgres' : engine === 'mongo' ? 'localhost (no auth)' : 'root via unix socket'}</span> : <span className="text-amber-300">failed</span>]
+    ['Admin access', st.authOk === undefined ? '—' : st.authOk ? <span className="text-green-300">{st.usingCredentials ? (engine === 'mssql' ? 'SQL login (stored credentials)' : 'stored credentials') : engine === 'postgres' ? 'peer auth as postgres' : engine === 'mongo' ? 'localhost (no auth)' : 'root via unix socket'}</span> : <span className="text-amber-300">{engine === 'mssql' && !st.usingCredentials ? 'login required' : 'failed'}</span>]
   ]
   for (const [k, v] of Object.entries(st.details ?? {})) if (v) rows.push([k.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/^./, (c) => c.toUpperCase()), <span className="font-mono text-xs">{v}</span>])
 
@@ -358,7 +453,7 @@ function EngineStatus({ serverId, engine, st, reload, onCredentials }: { serverI
       </div>
       {st.authOk === false && <DbErrorBox error={new ApiError(st.authError ?? 'Admin connection failed', 'DB_AUTH')} onRetry={() => void reload()} onCredentials={onCredentials} />}
       {st.needsInitdb && <Callout kind="warn">The PostgreSQL cluster is not initialised. Run <code>postgresql-setup --initdb</code> (RHEL) or <code>initdb</code> (Arch) before starting the service. The installer does this automatically.</Callout>}
-      {!st.clientAvailable && <Callout kind="warn">The admin client ({engine === 'mysql' ? 'mysql / mariadb' : engine === 'postgres' ? 'psql' : 'mongosh'}) is not installed, so databases cannot be managed from here.</Callout>}
+      {!st.clientAvailable && <Callout kind="warn">The admin client ({CLIENT_NAME[engine]}) is not installed, so databases cannot be managed from here.{engine === 'mssql' && <> Install it with <code>ACCEPT_EULA=Y apt-get install mssql-tools18 unixodbc-dev</code> (or <code>dnf install mssql-tools18 unixODBC-devel</code>).</>}</Callout>}
       {engine === 'mongo' && st.running && st.authOk && !st.usingCredentials && <Callout>MongoDB is running without access control (default). Create an admin user in the Users section and enable <code>security.authorization</code> in /etc/mongod.conf if the server is reachable from outside.</Callout>}
       <Card
         title="Service"
@@ -394,8 +489,70 @@ function EngineStatus({ serverId, engine, st, reload, onCredentials }: { serverI
       >
         <KV rows={rows} />
       </Card>
+      {engine === 'mssql' && st.mssql && <MssqlSettingsCard serverId={serverId} st={st} reload={reload} />}
       {secureOpen && <SecureModal serverId={serverId} st={st} onClose={() => setSecureOpen(false)} onDone={() => void reload()} />}
     </div>
+  )
+}
+
+function MssqlSettingsCard({ serverId, st, reload }: { serverId: string; st: DbEngineStatus; reload: () => Promise<void> }): React.JSX.Element {
+  const cur = st.mssql ?? { port: 1433, agentEnabled: false }
+  const [port, setPort] = useState(String(cur.port))
+  const [memOn, setMemOn] = useState(cur.memoryLimitMb !== undefined)
+  const [mem, setMem] = useState(String(cur.memoryLimitMb ?? 4096))
+  const [agent, setAgent] = useState(cur.agentEnabled)
+  const { run, busy } = useAction()
+  useEffect(() => {
+    setPort(String(cur.port))
+    setMemOn(cur.memoryLimitMb !== undefined)
+    setMem(String(cur.memoryLimitMb ?? 4096))
+    setAgent(cur.agentEnabled)
+  }, [cur.port, cur.memoryLimitMb, cur.agentEnabled])
+  const portN = Number(port)
+  const memN = Number(mem)
+  const patch: { port?: number; memoryLimitMb?: number | null; agentEnabled?: boolean } = {}
+  if (portN !== cur.port) patch.port = portN
+  if (memOn && memN !== cur.memoryLimitMb) patch.memoryLimitMb = memN
+  if (!memOn && cur.memoryLimitMb !== undefined) patch.memoryLimitMb = null
+  if (agent !== cur.agentEnabled) patch.agentEnabled = agent
+  const dirty = Object.keys(patch).length > 0
+  const valid = Number.isInteger(portN) && portN >= 1 && portN <= 65535 && (!memOn || (Number.isInteger(memN) && memN >= 2048))
+  const apply = async (): Promise<void> => {
+    const list = [patch.port !== undefined ? `TCP port → ${patch.port}` : null, patch.memoryLimitMb !== undefined ? `memory limit → ${patch.memoryLimitMb === null ? 'default' : patch.memoryLimitMb + ' MB'}` : null, patch.agentEnabled !== undefined ? `SQL Agent → ${patch.agentEnabled ? 'enabled' : 'disabled'}` : null].filter(Boolean)
+    if (!(await confirm({ title: 'Apply SQL Server settings', message: <>{list.join(', ')}. <b>mssql-server will be restarted</b>; open connections are dropped.</>, danger: true, confirmLabel: 'Apply & restart' }))) return
+    await run(() => api.call('db:mssql:configure', serverId, patch), { success: 'Settings applied, SQL Server restarted' })
+    await reload()
+  }
+  return (
+    <Card
+      title={
+        <span className="flex items-center gap-2">
+          <Settings size={13} /> Server settings (mssql-conf)
+        </span>
+      }
+      actions={
+        <Button size="xs" variant="primary" disabled={!dirty || !valid} loading={busy} onClick={apply}>
+          Apply & restart
+        </Button>
+      }
+    >
+      <div className="grid grid-cols-3 gap-4">
+        <Field label="TCP port" hint="network.tcpport — remember the firewall and the stored client port.">
+          <Input type="number" value={port} onChange={(e) => setPort(e.target.value)} mono />
+        </Field>
+        <Field label="Memory limit (MB)" hint="memory.memorylimitmb — default is 80 % of RAM. Minimum 2048.">
+          <div className="flex items-center gap-2">
+            <Checkbox checked={memOn} onChange={setMemOn} />
+            <Input type="number" value={mem} onChange={(e) => setMem(e.target.value)} disabled={!memOn} mono />
+          </div>
+        </Field>
+        <Field label="SQL Server Agent" hint="sqlagent.enabled — needed for scheduled jobs.">
+          <div className="h-8 flex items-center">
+            <Checkbox checked={agent} onChange={setAgent} label={agent ? 'Enabled' : 'Disabled'} />
+          </div>
+        </Field>
+      </div>
+    </Card>
   )
 }
 
@@ -454,7 +611,7 @@ function SecureModal({ serverId, st, onClose, onDone }: { serverId: string; st: 
 }
 
 function CredentialsModal({ serverId, engine, onClose, onSaved }: { serverId: string; engine: ServerEngine; onClose: () => void; onSaved: () => void }): React.JSX.Element {
-  const [user, setUser] = useState(engine === 'postgres' ? 'postgres' : engine === 'mongo' ? 'admin' : 'root')
+  const [user, setUser] = useState(engine === 'postgres' ? 'postgres' : engine === 'mongo' ? 'admin' : engine === 'mssql' ? 'sa' : 'root')
   const [pw, setPw] = useState('')
   const { run, busy } = useAction()
   const save = async (clear = false): Promise<void> => {
@@ -484,6 +641,7 @@ function CredentialsModal({ serverId, engine, onClose, onSaved }: { serverId: st
           Used when local socket / peer authentication is not available (for example MySQL root with a password, PostgreSQL over TCP, or MongoDB with access control). Kept only in the memory of this app; never written to disk.
           {engine === 'postgres' && ' The connection is made to 127.0.0.1 with password authentication.'}
           {engine === 'mongo' && ' Authenticates against the admin database.'}
+          {engine === 'mssql' && ' SQL Server always needs a SQL login (sa or another sysadmin); the password is passed to sqlcmd via SQLCMDPASSWORD.'}
         </Callout>
         <Field label="User">
           <Input value={user} onChange={(e) => setUser(e.target.value)} mono autoFocus />
@@ -518,12 +676,13 @@ function DatabasesTable({ serverId, engine, dbs, onBrowse, onCredentials }: { se
 
   const list = (dbs.data ?? []).filter((d) => (showSystem || !d.system) && (!filter || d.name.toLowerCase().includes(filter.toLowerCase())))
   const columns: Column<DbDatabase>[] = [
-    { key: 'name', header: 'Name', render: (d) => <span className="font-mono text-xs flex items-center gap-2">{d.name}{d.system && <Badge>system</Badge>}</span>, sortValue: (d) => d.name },
+    { key: 'name', header: 'Name', render: (d) => <span className="font-mono text-xs flex items-center gap-2">{d.name}{d.system && <Badge>system</Badge>}{d.state && d.state !== 'ONLINE' && <Badge color="warn">{d.state}</Badge>}</span>, sortValue: (d) => d.name },
     { key: 'size', header: 'Size', align: 'right', render: (d) => fmtBytes(d.sizeBytes), sortValue: (d) => d.sizeBytes ?? 0, width: '110px' },
-    engine === 'postgres'
+    engine === 'postgres' || engine === 'mssql'
       ? { key: 'owner', header: 'Owner', render: (d) => <span className="font-mono text-xs">{d.owner ?? '—'}</span>, sortValue: (d) => d.owner ?? '' }
       : { key: 'charset', header: engine === 'mongo' ? '' : 'Charset / collation', render: (d) => (engine === 'mongo' ? '' : <span className="text-xs text-muted">{[d.charset, d.collation].filter(Boolean).join(' / ') || '—'}</span>) },
-    { key: 'tables', header: engine === 'mongo' ? 'Collections' : 'Tables', align: 'right', render: (d) => d.tables ?? '—', sortValue: (d) => d.tables ?? -1, width: '110px' },
+    ...(engine === 'mssql' ? [{ key: 'recovery', header: 'Recovery / collation', render: (d: DbDatabase) => <span className="text-xs text-muted">{[d.recoveryModel, d.collation].filter(Boolean).join(' · ') || '—'}</span> } as Column<DbDatabase>] : []),
+    ...(engine === 'mssql' ? [] : [{ key: 'tables', header: engine === 'mongo' ? 'Collections' : 'Tables', align: 'right', render: (d: DbDatabase) => d.tables ?? '—', sortValue: (d: DbDatabase) => d.tables ?? -1, width: '110px' } as Column<DbDatabase>]),
     {
       key: 'actions',
       header: '',
@@ -646,6 +805,7 @@ function CreateDatabaseModal({ serverId, engine, onClose, onCreated }: { serverI
           </>
         )}
         {engine === 'mongo' && <Callout>MongoDB creates databases lazily; an empty collection named <code>default</code> is created so the database shows up.</Callout>}
+        {engine === 'mssql' && <Callout>Created with the server default collation and SIMPLE/FULL recovery model inherited from <code>model</code>.</Callout>}
       </div>
     </Modal>
   )
@@ -674,9 +834,9 @@ function UsersTable({ serverId, engine, dbs, onCredentials }: { serverId: string
   const list = (users.data ?? []).filter((u) => (showSystem || !u.system) && (!filter || u.user.toLowerCase().includes(filter.toLowerCase())))
   const columns: Column<DbUser>[] = [
     { key: 'user', header: 'User', render: (u) => <span className="font-mono text-xs flex items-center gap-2">{u.user || <i className="text-muted">(anonymous)</i>}{u.superuser && <Badge color="warn">super</Badge>}{u.system && <Badge>system</Badge>}</span>, sortValue: (u) => u.user, width: '220px' },
-    ...(engine !== 'postgres' ? [{ key: 'host', header: engine === 'mongo' ? 'Auth database' : 'Host', render: (u: DbUser) => <span className="font-mono text-xs">{u.host}</span>, sortValue: (u: DbUser) => u.host ?? '', width: '160px' } as Column<DbUser>] : []),
-    { key: 'priv', header: 'Privileges', render: (u) => <span className="text-xs text-muted break-words">{u.privileges}</span> },
-    ...(engine === 'mysql' ? [{ key: 'plugin', header: 'Auth', render: (u: DbUser) => <span className="text-xs text-dim">{u.plugin ?? ''}</span>, width: '160px' } as Column<DbUser>] : []),
+    ...(engine !== 'postgres' ? [{ key: 'host', header: engine === 'mongo' ? 'Auth database' : engine === 'mssql' ? 'Default database' : 'Host', render: (u: DbUser) => <span className="font-mono text-xs">{u.host}</span>, sortValue: (u: DbUser) => u.host ?? '', width: '160px' } as Column<DbUser>] : []),
+    { key: 'priv', header: engine === 'mssql' ? 'Roles' : 'Privileges', render: (u) => <span className="text-xs text-muted break-words">{u.privileges}</span> },
+    ...(engine === 'mysql' || engine === 'mssql' ? [{ key: 'plugin', header: engine === 'mssql' ? 'Type' : 'Auth', render: (u: DbUser) => <span className="text-xs text-dim">{u.plugin ?? ''}</span>, width: '160px' } as Column<DbUser>] : []),
     {
       key: 'actions',
       header: '',
@@ -690,7 +850,7 @@ function UsersTable({ serverId, engine, dbs, onCredentials }: { serverId: string
           <Button size="xs" variant="ghost" icon={<KeyRound size={11} />} onClick={() => setPwFor(u)} disabled={!u.user}>
             Password
           </Button>
-          <Button size="xs" variant="ghost" className="text-red-300" icon={<Trash2 size={11} />} onClick={() => drop(u)} disabled={u.user === 'root' || u.user === 'postgres'}>
+          <Button size="xs" variant="ghost" className="text-red-300" icon={<Trash2 size={11} />} onClick={() => drop(u)} disabled={u.user === 'root' || u.user === 'postgres' || u.user.toLowerCase() === 'sa'}>
             Drop
           </Button>
         </div>
@@ -757,8 +917,8 @@ function UsersTable({ serverId, engine, dbs, onCredentials }: { serverId: string
 function PrivilegesSelect({ value, onChange, engine }: { value: DbPrivileges; onChange: (v: DbPrivileges) => void; engine: ServerEngine }): React.JSX.Element {
   return (
     <Select value={value} onChange={(e) => onChange(e.target.value as DbPrivileges)}>
-      <option value="all">{engine === 'mongo' ? 'dbOwner (read/write/admin)' : 'All privileges on the database'}</option>
-      <option value="readonly">{engine === 'mongo' ? 'read' : 'Read-only (SELECT)'}</option>
+      <option value="all">{engine === 'mongo' ? 'dbOwner (read/write/admin)' : engine === 'mssql' ? 'db_owner (full control of the database)' : 'All privileges on the database'}</option>
+      <option value="readonly">{engine === 'mongo' ? 'read' : engine === 'mssql' ? 'db_datareader (read-only)' : 'Read-only (SELECT)'}</option>
       <option value="none">No grants (login only)</option>
     </Select>
   )
@@ -771,7 +931,7 @@ function CreateUserModal({ serverId, engine, dbs, onClose, onCreated }: { server
   const [database, setDatabase] = useState(dbs[0]?.name ?? '')
   const [privs, setPrivs] = useState<DbPrivileges>('all')
   const { run, busy } = useAction()
-  const valid = /^[A-Za-z0-9_][A-Za-z0-9_$\-]{0,63}$/.test(user) && pw.length > 0 && (engine !== 'mysql' || /^[A-Za-z0-9_.%:\-]{1,60}$/.test(host))
+  const valid = /^[A-Za-z0-9_][A-Za-z0-9_$\-]{0,63}$/.test(user) && pw.length > 0 && (engine !== 'mysql' || /^[A-Za-z0-9_.%:\-]{1,60}$/.test(host)) && (engine !== 'mssql' || isStrongSqlPassword(pw))
   const create = async (): Promise<void> => {
     const ok = await run(() => api.call('db:createUser', serverId, engine, { user, host: engine === 'mysql' ? host : undefined, password: pw, database: privs === 'none' ? undefined : database || undefined, privileges: privs }).then(() => true), { success: `Created user ${user}` })
     if (ok) onCreated()
@@ -799,16 +959,16 @@ function CreateUserModal({ serverId, engine, dbs, onClose, onCreated }: { server
             <Input value={host} onChange={(e) => setHost(e.target.value)} mono />
           </Field>
         )}
-        <Field label="Password" className="col-span-6">
+        <Field label="Password" className="col-span-6" hint={engine === 'mssql' ? 'SQL Server policy: at least 8 characters with upper-case, lower-case letters, digits and symbols.' : undefined}>
           <div className="flex gap-2">
             <Input type="text" value={pw} onChange={(e) => setPw(e.target.value)} mono autoComplete="off" />
             <Button onClick={() => setPw(genPassword())}>Generate</Button>
           </div>
         </Field>
-        <Field label="Privileges" className="col-span-3">
+        <Field label={engine === 'mssql' ? 'Database role' : 'Privileges'} className="col-span-3">
           <PrivilegesSelect value={privs} onChange={setPrivs} engine={engine} />
         </Field>
-        <Field label="On database" className="col-span-3">
+        <Field label={engine === 'mssql' ? 'Database (also default database)' : 'On database'} className="col-span-3">
           <Select value={database} onChange={(e) => setDatabase(e.target.value)} disabled={privs === 'none'}>
             {engine === 'mongo' && privs !== 'none' && <option value="">all databases (root / readAnyDatabase)</option>}
             {dbs.map((d) => (
@@ -821,6 +981,11 @@ function CreateUserModal({ serverId, engine, dbs, onClose, onCreated }: { server
         {engine === 'mongo' && (
           <div className="col-span-6">
             <Callout>The user is created in the <code>admin</code> authentication database.</Callout>
+          </div>
+        )}
+        {engine === 'mssql' && (
+          <div className="col-span-6">
+            <Callout>Creates a SQL login (<code>CREATE LOGIN … CHECK_POLICY = ON</code>) and, when a database is chosen, a database user mapped to it with the selected role.</Callout>
           </div>
         )}
       </div>
@@ -951,7 +1116,8 @@ function BackupsPanel({ serverId, engine, dbs, summary }: { serverId: string; en
       )
     }
   ]
-  const tool = engine === 'mysql' ? 'mysqldump --single-transaction | gzip' : engine === 'postgres' ? 'pg_dump | gzip' : 'mongodump --archive --gzip'
+  const tool = engine === 'mysql' ? 'mysqldump --single-transaction | gzip' : engine === 'postgres' ? 'pg_dump | gzip' : engine === 'mssql' ? 'BACKUP DATABASE … WITH COMPRESSION, INIT' : 'mongodump --archive --gzip'
+  const dir = engine === 'mssql' ? MSSQL_BACKUP_DIR : summary.backupsDir
   return (
     <div className="flex flex-col gap-4">
       <Card title="Create backup">
@@ -970,12 +1136,12 @@ function BackupsPanel({ serverId, engine, dbs, summary }: { serverId: string; en
             Backup now
           </Button>
           <div className="text-xs text-dim pb-2">
-            {tool} → <span className="font-mono">{summary.backupsDir}/&lt;db&gt;-&lt;timestamp&gt;…</span>
+            {tool} → <span className="font-mono">{dir}/&lt;db&gt;-&lt;timestamp&gt;{engine === 'mssql' ? '.bak' : '…'}</span>
           </div>
         </div>
         {!summary[engine].dumpToolAvailable && <Callout kind="warn">The dump tool for {engineName(engine, summary[engine])} is not installed on the server.</Callout>}
         <div className="mt-3 flex items-center gap-2 text-xs text-muted">
-          <FolderOpen size={13} /> Backups live in <span className="font-mono text-text">{summary.backupsDir}</span> (mode 700). Download them with the Files module.
+          <FolderOpen size={13} /> Backups live in <span className="font-mono text-text">{dir}</span> ({engine === 'mssql' ? 'written by the mssql service user, mode 700' : 'mode 700'}). Download them with the Files module.
           <Button size="xs" variant="subtle" onClick={() => useApp.getState().setPage(serverId, 'files')}>
             Reveal in Files
           </Button>
@@ -1283,7 +1449,7 @@ function DataBrowser({ serverId, engine, db, onCredentials }: { serverId: string
               <Input
                 value={where}
                 onChange={(e) => setWhere(e.target.value)}
-                placeholder={engine === 'postgres' ? `"status" = 'active' AND id > 100` : `status = 'active' AND id > 100`}
+                placeholder={engine === 'postgres' ? `"status" = 'active' AND id > 100` : engine === 'mssql' ? `[status] = N'active' AND id > 100` : `status = 'active' AND id > 100`}
                 mono
                 className="h-7 text-xs flex-1"
                 onKeyDown={(e) => {
@@ -1464,11 +1630,11 @@ function SqlEditor({ serverId, engine, db, onCredentials }: { serverId: string; 
           mono
           rows={7}
           spellCheck={false}
-          placeholder={engine === 'postgres' ? 'SELECT * FROM pg_stat_activity;' : engine === 'sqlite' ? 'SELECT name FROM sqlite_master;' : 'SHOW TABLES;'}
+          placeholder={engine === 'postgres' ? 'SELECT * FROM pg_stat_activity;' : engine === 'sqlite' ? 'SELECT name FROM sqlite_master;' : engine === 'mssql' ? 'SELECT name, state_desc FROM sys.databases;\nGO' : 'SHOW TABLES;'}
           className="rounded-none border-0 border-b border-border focus:ring-0"
         />
         <div className="px-3 py-1.5 text-[11px] text-dim flex items-center gap-2">
-          Runs with admin privileges through the local {engine === 'postgres' ? 'psql' : engine === 'sqlite' ? 'sqlite3' : 'mysql'} client; multiple statements are allowed.
+          Runs with admin privileges through the local {engine === 'postgres' ? 'psql' : engine === 'sqlite' ? 'sqlite3' : engine === 'mssql' ? 'sqlcmd' : 'mysql'} client; multiple statements{engine === 'mssql' ? ' and GO batches' : ''} are allowed.
           {result && (
             <span className="ml-auto text-muted">
               {result.columns.length ? `${result.rows.length.toLocaleString()} row${result.rows.length === 1 ? '' : 's'}` : result.affected !== undefined ? `${result.affected.toLocaleString()} row${result.affected === 1 ? '' : 's'} affected` : 'OK'} · {result.ms} ms

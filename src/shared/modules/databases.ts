@@ -1,8 +1,17 @@
 // Shared types for the Databases module (main <-> renderer).
 
-export type DbEngine = 'mysql' | 'postgres' | 'mongo' | 'sqlite'
+export type DbEngine = 'mysql' | 'postgres' | 'mongo' | 'mssql' | 'sqlite'
 export type DbServiceAction = 'start' | 'stop' | 'restart' | 'enable' | 'disable'
 export type DbPrivileges = 'all' | 'readonly' | 'none'
+
+export interface MssqlSettings {
+  /** TCP port (network.tcpport). */
+  port: number
+  /** memory.memorylimitmb; undefined = default (80 % of RAM). */
+  memoryLimitMb?: number
+  /** sqlagent.enabled */
+  agentEnabled: boolean
+}
 
 export interface DbEngineStatus {
   engine: DbEngine
@@ -10,13 +19,15 @@ export interface DbEngineStatus {
   /** mysql only: which flavour is installed. */
   flavor?: 'mysql' | 'mariadb'
   version?: string
+  /** mssql: SERVERPROPERTY('Edition'). */
+  edition?: string
   /** systemd unit name (when found). */
   unit?: string
   running: boolean
   enabled: boolean
-  /** Admin client binary present (mysql/mariadb, psql, mongosh/mongo). */
+  /** Admin client binary present (mysql/mariadb, psql, mongosh/mongo, sqlcmd). */
   clientAvailable: boolean
-  /** Dump/restore tooling present (mysqldump, pg_dump, mongodump). */
+  /** Dump/restore tooling present (mysqldump, pg_dump, mongodump; sqlcmd for mssql). */
   dumpToolAvailable: boolean
   /** Whether the admin connection worked (undefined when the server is not running). */
   authOk?: boolean
@@ -29,6 +40,8 @@ export interface DbEngineStatus {
   sizeBytes?: number
   /** postgres on RHEL-like systems: the cluster has not been initialised yet. */
   needsInitdb?: boolean
+  /** mssql: values from /var/opt/mssql/mssql.conf. */
+  mssql?: MssqlSettings
   details?: Record<string, string>
 }
 
@@ -36,10 +49,11 @@ export interface DbStatusSummary {
   mysql: DbEngineStatus
   postgres: DbEngineStatus
   mongo: DbEngineStatus
+  mssql: DbEngineStatus
   sqlite: { installed: boolean; version?: string }
   backupsDir: string
   backupsCount: number
-  os: { pkgManager: string; id: string; prettyName: string }
+  os: { pkgManager: string; id: string; prettyName: string; versionId: string; memTotalBytes?: number }
 }
 
 export interface DbDatabase {
@@ -50,10 +64,15 @@ export interface DbDatabase {
   collation?: string
   tables?: number
   system?: boolean
+  /** mssql: ONLINE / RESTORING / … */
+  state?: string
+  /** mssql: SIMPLE / FULL / BULK_LOGGED */
+  recoveryModel?: string
 }
 
 export interface DbUser {
   user: string
+  /** mysql: host; mongo: authentication database; mssql: default database. */
   host?: string
   /** Human-readable privileges summary. */
   privileges: string
@@ -161,7 +180,30 @@ export interface SqliteOpenResult {
   tables: DbTable[]
 }
 
+export interface MssqlInstallInput {
+  saPassword: string
+  /** Express | Developer | Standard | Enterprise | Web | Evaluation, or a 25-character product key. */
+  edition: string
+  acceptEula: boolean
+}
+
+export const MSSQL_EDITIONS: { id: string; label: string }[] = [
+  { id: 'Express', label: 'Express (free, 10 GB per database)' },
+  { id: 'Developer', label: 'Developer (free, non-production use only)' },
+  { id: 'Evaluation', label: 'Evaluation (180 days)' },
+  { id: 'Standard', label: 'Standard (paid, license required)' },
+  { id: 'Enterprise', label: 'Enterprise (paid, license required)' },
+  { id: 'Web', label: 'Web (paid, hosting license)' }
+]
+
+/** SQL Server password policy: at least 8 chars and three of upper / lower / digit / symbol — we require all four. */
+export function isStrongSqlPassword(pw: string): boolean {
+  return pw.length >= 8 && pw.length <= 128 && /[A-Z]/.test(pw) && /[a-z]/.test(pw) && /[0-9]/.test(pw) && /[^A-Za-z0-9]/.test(pw)
+}
+
 export const DB_BACKUPS_DIR = '/var/backups/servermate'
+export const MSSQL_BACKUP_DIR = '/var/opt/mssql/backup'
+export const MSSQL_EULA_URL = 'https://go.microsoft.com/fwlink/?linkid=2104294'
 export const DB_ROWS_MAX_LIMIT = 1000
 export const DB_EXPORT_MAX_BYTES = 5 * 1024 * 1024
 export const DB_IMPORT_MAX_BYTES = 20 * 1024 * 1024
@@ -170,5 +212,6 @@ export const DB_ENGINE_LABEL: Record<DbEngine, string> = {
   mysql: 'MySQL / MariaDB',
   postgres: 'PostgreSQL',
   mongo: 'MongoDB',
+  mssql: 'SQL Server',
   sqlite: 'SQLite client'
 }

@@ -26,6 +26,18 @@ export default function Overview({ serverId }: PageProps): React.JSX.Element {
     void snap.reload()
     void qa.reload()
   }
+  // Refresh whenever a background task for this server finishes (updates, swap, fail2ban, ...).
+  const finishedTasks = useApp((s) => s.tasks.filter((t) => t.serverId === serverId && t.status !== 'running' && t.status !== 'queued').length)
+  const firstRun = React.useRef(true)
+  useEffect(() => {
+    if (firstRun.current) {
+      firstRun.current = false
+      return
+    }
+    const t = setTimeout(reloadAll, 800)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finishedTasks])
 
   return (
     <>

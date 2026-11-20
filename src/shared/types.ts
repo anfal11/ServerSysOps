@@ -15,6 +15,7 @@ export interface ServerProfile {
   hasPassword?: boolean
   hasPassphrase?: boolean
   hasSudoPassword?: boolean
+  hasTotpSecret?: boolean
   sudoMode: SudoMode
   group?: string
   color?: string
@@ -28,6 +29,18 @@ export interface ServerSecrets {
   password?: string
   passphrase?: string
   sudoPassword?: string
+  /** Base32 TOTP secret; when set, the app answers "Verification code" prompts itself. */
+  totpSecret?: string
+}
+
+export interface AuthPrompt {
+  requestId: string
+  serverId: string
+  serverName: string
+  title: string
+  instructions: string
+  /** prefilled = the app already has an answer (password / TOTP) and only shows it as filled. */
+  prompts: { prompt: string; echo: boolean; prefilled?: boolean }[]
 }
 
 export type ServerProfileInput = Omit<ServerProfile, 'id' | 'createdAt' | 'hasPassword' | 'hasPassphrase' | 'hasSudoPassword'> &
@@ -419,3 +432,5 @@ export type AppEvent =
   | { type: 'alert'; alert: AlertEvent }
   | { type: 'transfer'; id: string; name: string; direction: 'upload' | 'download'; done: number; total: number; status: 'running' | 'done' | 'failed'; error?: string }
   | { type: 'update'; status: string; info?: unknown }
+  | { type: 'auth-prompt'; prompt: AuthPrompt }
+  | { type: 'auth-prompt-done'; requestId: string }

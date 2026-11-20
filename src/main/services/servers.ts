@@ -49,9 +49,16 @@ export function register(ctx: Ctx): void {
 
   /** Test a connection without saving. */
   ctx.handle('servers:test', async (_s, input: ServerProfileInput) => {
-    const { password, passphrase, sudoPassword, ...rest } = input
+    const { password, passphrase, sudoPassword, totpSecret, ...rest } = input
     const profile = { ...rest, id: 'test', createdAt: Date.now(), port: Number(rest.port) || 22 }
-    const client = new SshClient(profile as never, { password, passphrase, sudoPassword })
+    const saved = rest.id ? store.getSecrets(rest.id) : {}
+    const client = new SshClient(profile as never, {
+      password: password || saved.password,
+      passphrase: passphrase || saved.passphrase,
+      sudoPassword: sudoPassword || saved.sudoPassword,
+      totpSecret: totpSecret?.replace(/\s+/g, '').toUpperCase() || saved.totpSecret
+    })
+    client.promptHandler = (name, instr, prompts, prefilled) => ctx.askAuth(rest.id ?? 'test', name, instr, prompts, prefilled)
     try {
       await client.connect()
       const sudoOk = await client.verifySudo()
@@ -65,6 +72,7 @@ export function register(ctx: Ctx): void {
   })
 
   ctx.handle('servers:verifySudo', async (id: string) => ctx.ssh(id).verifySudo())
+  ctx.handle('servers:answerPrompt', (_s, requestId: string, answers: string[] | null) => ctx.answerAuth(requestId, answers))
 
   // ----- settings / audit -----
   ctx.handle('settings:get', () => getSettings())

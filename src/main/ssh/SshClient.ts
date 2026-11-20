@@ -4,6 +4,7 @@ import { readFileSync } from 'fs'
 import type { ExecResult, OsInfo, PkgManager, ServerProfile, ServerSecrets } from '@shared/types'
 import { checkHostKey, rememberHostKey, type HostKeyVerdict } from './hostkeys'
 import { shq } from './shell'
+import { totp } from './totp'
 
 export interface ExecOptions {
   /** Run via sudo (uses stored sudo password when needed). */
@@ -51,6 +52,8 @@ export class SshClient extends EventEmitter {
   os: OsInfo | null = null
   hostKeyVerdict: HostKeyVerdict | null = null
   private jump?: SshClient
+  /** Asked when the server sends keyboard-interactive prompts the client cannot answer itself (e.g. 2FA codes). */
+  promptHandler?: (name: string, instructions: string, prompts: { prompt: string; echo: boolean }[], prefilled: (string | null)[]) => Promise<string[] | null>
 
   constructor(profile: ServerProfile, secrets: ServerSecrets, jump?: SshClient) {
     super()
@@ -121,8 +124,8 @@ export class SshClient extends EventEmitter {
         this.emit('ready')
         resolve()
       })
-      c.on('keyboard-interactive', (_name, _instr, _lang, prompts, finish) => {
-        finish(prompts.map(() => this.secrets.password ?? ''))
+      c.on('keyboard-interactive', (name, instr, _lang, prompts, finish) => {
+        void this.answerPrompts(name, instr, prompts.map((p) => ({ prompt: p.prompt, echo: !!p.echo }))).then(finish)
       })
       c.on('banner', (msg) => this.emit('banner', msg))
       c.on('error', (err: Error & { level?: string }) => {
@@ -161,6 +164,26 @@ export class SshClient extends EventEmitter {
       }
     })
     this.os = await this.detectOs()
+  }
+
+  /** Answer keyboard-interactive prompts: password → stored password, verification code → TOTP, else ask the UI. */
+  private async answerPrompts(name: string, instructions: string, prompts: { prompt: string; echo: boolean }[]): Promise<string[]> {
+    const prefilled: (string | null)[] = prompts.map((p) => {
+      const q = p.prompt.toLowerCase()
+      if (/passphrase|password|mot de passe|contraseña/.test(q)) return this.secrets.password ?? null
+      if (/verification|code|otp|token|authenticator|one-time|2fa/.test(q)) return this.secrets.totpSecret ? totp(this.secrets.totpSecret) : null
+      return null
+    })
+    if (prefilled.every((a) => a !== null)) return prefilled as string[]
+    if (this.promptHandler) {
+      try {
+        const answers = await this.promptHandler(name, instructions, prompts, prefilled)
+        if (answers) return prompts.map((_, i) => answers[i] ?? prefilled[i] ?? '')
+      } catch {
+        /* fall through */
+      }
+    }
+    return prefilled.map((a) => a ?? '')
   }
 
   disconnect(): void {

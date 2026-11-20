@@ -15,6 +15,7 @@ import * as cron from './services/cron'
 import * as processes from './services/processes'
 import * as users from './services/users'
 import * as firewall from './services/firewall'
+import * as twofactor from './services/twofactor'
 import * as security from './services/security'
 import * as logs from './services/logs'
 import * as snippets from './services/snippets'
@@ -67,7 +68,7 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
 
   const ctx = createContext()
-  for (const svc of [servers, terminal, overview, quickactions, files, docker, webserver, databases, runtimes, cron, processes, users, firewall, security, logs, snippets, alerts, tunnels]) {
+  for (const svc of [servers, terminal, overview, quickactions, files, docker, webserver, databases, runtimes, cron, processes, users, firewall, twofactor, security, logs, snippets, alerts, tunnels]) {
     svc.register(ctx)
   }
   updater.register(ctx)

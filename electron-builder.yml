@@ -1,0 +1,32 @@
+appId: com.servermate.app
+productName: ServerMate
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+asarUnpack:
+  - node_modules/ssh2/**
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: ${productName}_${version}_${arch}-setup.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  shortcutName: ServerMate
+mac:
+  category: public.app-category.developer-tools
+  target: [dmg]
+linux:
+  target: [AppImage, deb, rpm]
+  category: Development
+publish:
+  provider: generic
+  url: https://example.invalid/servermate/updates
+npmRebuild: false

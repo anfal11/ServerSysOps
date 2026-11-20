@@ -1,0 +1,97 @@
+// Extra types for the Firewall module (shared between main and renderer).
+// FirewallRule and FirewallState live in @shared/types.
+
+import type { FirewallRule, FirewallState, ListeningPort } from '../types'
+
+export interface FirewallRuleEx extends FirewallRule {
+  direction: 'in' | 'out' | 'fwd'
+  /** Rule applies to a specific interface. */
+  iface?: string
+}
+
+export type FwBackend = 'ufw' | 'firewalld'
+export type FwAction = 'allow' | 'deny' | 'reject' | 'limit'
+export type FwProto = 'tcp' | 'udp' | 'any'
+export type FwDirection = 'in' | 'out'
+export type FwPolicy = 'deny' | 'allow' | 'reject'
+export type FwLogLevel = 'off' | 'low' | 'medium' | 'high' | 'full'
+
+export interface FirewalldZone {
+  name: string
+  interfaces: string[]
+  sources: string[]
+  services: string[]
+  ports: string[]
+  richRules: string[]
+  target: string
+}
+
+export interface FirewallStateEx extends FirewallState {
+  rules: FirewallRuleEx[]
+  /** Which backends are present on the server. */
+  backendAvailable: FwBackend[]
+  /** True when a backend can be installed with the package manager. */
+  installable: boolean
+  /** Service is enabled at boot (ufw: ufw service / firewalld: systemctl is-enabled). */
+  enabledAtBoot: boolean
+  logging: string
+  /** firewalld only. */
+  defaultZone?: string
+  zones?: FirewalldZone[]
+  /** All listening ports of sshd (first one is `sshPort`). */
+  sshPorts: number[]
+  /** A rule permits the SSH port (for every protocol / any source). */
+  sshAllowed: boolean
+  /** Recommended backend for this distro when nothing is installed. */
+  recommended: FwBackend
+  version?: string
+}
+
+export interface AddRuleInput {
+  action: FwAction
+  /** Port, comma-separated list (`80,443`) or range (`6000:6100`). Omit for "any port" rules (requires `from`). */
+  port?: string | number
+  proto?: FwProto
+  /** Source IP or CIDR. */
+  from?: string
+  /** Destination IP or CIDR (ufw only). */
+  to?: string
+  comment?: string
+  direction?: FwDirection
+  v6?: boolean
+  /** Confirm a deny/reject rule that would block the SSH port. */
+  force?: boolean
+}
+
+export interface FirewallPreset {
+  id: string
+  label: string
+  description: string
+  /** Port specs as `port/proto`. */
+  ports: { port: string; proto: 'tcp' | 'udp' }[]
+  /** firewalld service name (preferred when available). */
+  service?: string
+  /** All ports in this preset are allowed by the current rules. */
+  allowed: boolean
+  /** A preset that only opens the UI's custom-rule dialog. */
+  custom?: boolean
+}
+
+export interface BlockedPacket {
+  time: string
+  action: string
+  iface: string
+  src: string
+  dst: string
+  proto: string
+  spt?: number
+  dpt?: number
+  raw: string
+}
+
+export interface ExposedPort extends ListeningPort {
+  /** Covered by an allow rule (or firewall inactive => everything exposed). */
+  allowed: boolean
+  /** Listens on a non-loopback address. */
+  public: boolean
+}

@@ -388,7 +388,7 @@ function ContainersTab({ serverId, needsSudo, onChanged }: { serverId: string; n
       render: (c) =>
         c.state === 'running' && c.cpuPct !== undefined ? (
           <div className="text-xs whitespace-nowrap">
-            <span className={cls(c.cpuPct > 80 && 'text-amber-300')}>{c.cpuPct.toFixed(1)}%</span>
+            <span className={cls(c.cpuPct > 80 && 'text-warn-fg')}>{c.cpuPct.toFixed(1)}%</span>
             <span className="text-dim"> · </span>
             <span className="text-muted">{(c.memUsage ?? '').split('/')[0].trim()}</span>
             {c.memPct !== undefined && <span className="text-dim"> ({c.memPct.toFixed(0)}%)</span>}
@@ -1515,7 +1515,7 @@ function SystemTab({ serverId, info, onService, busy }: { serverId: string; info
             </div>
             <Checkbox checked={opts.networks} onChange={(v) => set('networks', v)} label="Unused networks" />
             <Checkbox checked={opts.buildCache} onChange={(v) => set('buildCache', v)} label="Build cache" />
-            <Checkbox checked={opts.volumes} onChange={(v) => set('volumes', v)} label={<span className="text-amber-200">Unused anonymous volumes (data loss)</span>} />
+            <Checkbox checked={opts.volumes} onChange={(v) => set('volumes', v)} label={<span className="text-warn-fg">Unused anonymous volumes (data loss)</span>} />
             <div className="text-[11px] text-dim mt-1">Runs the matching <code>docker … prune -f</code> commands as a task and reports the reclaimed space.</div>
           </div>
         </Card>

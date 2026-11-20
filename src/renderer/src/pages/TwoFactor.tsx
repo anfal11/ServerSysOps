@@ -49,7 +49,7 @@ const MODE_INFO: Record<TfaEnforceMode, { title: string; description: string; st
 function StepTitle({ n, children, done }: { n: number; children: React.ReactNode; done?: boolean }): React.JSX.Element {
   return (
     <span className="flex items-center gap-2">
-      <span className={cls('inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-semibold', done ? 'bg-ok/20 text-green-300' : 'bg-panel-2 text-muted border border-border-2')}>{done ? <Check size={12} strokeWidth={3} /> : n}</span>
+      <span className={cls('inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-semibold', done ? 'bg-ok/20 text-ok-fg' : 'bg-panel-2 text-muted border border-border-2')}>{done ? <Check size={12} strokeWidth={3} /> : n}</span>
       {children}
     </span>
   )
@@ -417,7 +417,7 @@ export default function TwoFactor({ serverId }: PageProps): React.JSX.Element {
               <div className="space-y-4">
                 {enforced && (
                   <div className="flex items-center gap-3 flex-wrap">
-                    <Lock size={16} className="text-green-300 shrink-0" />
+                    <Lock size={16} className="text-ok-fg shrink-0" />
                     <div className="flex-1 text-[13px]">
                       <b>{TFA_MODE_LABEL[st.mode]}</b> is active{st.nullok ? ' — users without an enrollment may still log in (nullok)' : ' — every account must be enrolled'}.
                       <div className="text-dim text-[11px] mt-0.5">
@@ -684,7 +684,7 @@ function EnrollModal({ serverId, user, force, hostname, onClose, onDone }: { ser
           </Callout>
           <div className="flex gap-5">
             <div className="shrink-0 bg-white rounded-md p-2 w-[236px] h-[236px] flex items-center justify-center">
-              {qr ? <img src={qr} alt="Enrollment QR code" width={220} height={220} /> : <span className="text-xs text-gray-500">Rendering…</span>}
+              {qr ? <img src={qr} alt="Enrollment QR code" width={220} height={220} /> : <span className="text-xs text-dim">Rendering…</span>}
             </div>
             <div className="flex-1 min-w-0 space-y-3">
               <div>
@@ -718,7 +718,7 @@ function EnrollModal({ serverId, user, force, hostname, onClose, onDone }: { ser
                 </div>
               </div>
               {result.savedToProfile && (
-                <div className="text-[11px] text-green-300 flex items-center gap-1.5">
+                <div className="text-[11px] text-ok-fg flex items-center gap-1.5">
                   <Check size={12} /> Secret saved in this server profile; ServerMate will answer code prompts itself.
                 </div>
               )}
@@ -743,12 +743,12 @@ function EnrollModal({ serverId, user, force, hostname, onClose, onDone }: { ser
                   Verify
                 </Button>
                 {verified === true && (
-                  <span className="flex items-center gap-1 text-green-300 text-xs">
+                  <span className="flex items-center gap-1 text-ok-fg text-xs">
                     <CheckCircle2 size={14} /> Code is valid — the app is set up correctly
                   </span>
                 )}
                 {verified === false && (
-                  <span className="flex items-center gap-1 text-red-300 text-xs">
+                  <span className="flex items-center gap-1 text-danger-fg text-xs">
                     <XCircle size={14} /> Wrong code — rescan the QR or check the phone’s clock
                   </span>
                 )}

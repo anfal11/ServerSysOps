@@ -764,7 +764,7 @@ function PhpVersionCard({ serverId, status, v, reload, onRemove }: { serverId: s
               <span key={e} className="inline-flex items-center gap-1 h-5 px-1.5 rounded text-[11px] font-mono bg-panel-2 border border-border-2">
                 {e}
                 {!showExt && (
-                  <button className="text-dim hover:text-red-300" title={`Remove ${e}`} onClick={() => void removeExt(e)}>
+                  <button className="text-dim hover:text-danger-fg" title={`Remove ${e}`} onClick={() => void removeExt(e)}>
                     <X size={10} />
                   </button>
                 )}

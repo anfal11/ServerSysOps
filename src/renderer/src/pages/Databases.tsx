@@ -137,7 +137,7 @@ function DbErrorBox({ error, onRetry, onCredentials }: { error: unknown; onRetry
         <div className="flex items-start gap-3">
           <div className="flex-1 whitespace-pre-wrap break-words">
             <b>Admin access refused.</b> {errMsg(error)}
-            <div className="mt-1 text-amber-200/70">Enter an admin login and password; they are kept in memory only while the app runs and are passed to the client through its environment, never on a command line.</div>
+            <div className="mt-1 text-warn-fg/70">Enter an admin login and password; they are kept in memory only while the app runs and are passed to the client through its environment, never on a command line.</div>
           </div>
           <Button size="xs" icon={<KeyRound size={11} />} onClick={onCredentials}>
             Set credentials
@@ -439,7 +439,7 @@ function EngineStatus({ serverId, engine, st, reload, onCredentials }: { serverI
     ['Port', st.port ?? '—'],
     ['Bind address', <span className="font-mono text-xs">{st.bindAddress ?? '—'}</span>],
     ['Size on disk', fmtBytes(st.sizeBytes)],
-    ['Admin access', st.authOk === undefined ? '—' : st.authOk ? <span className="text-green-300">{st.usingCredentials ? (engine === 'mssql' ? 'SQL login (stored credentials)' : 'stored credentials') : engine === 'postgres' ? 'peer auth as postgres' : engine === 'mongo' ? 'localhost (no auth)' : 'root via unix socket'}</span> : <span className="text-amber-300">{engine === 'mssql' && !st.usingCredentials ? 'login required' : 'failed'}</span>]
+    ['Admin access', st.authOk === undefined ? '—' : st.authOk ? <span className="text-ok-fg">{st.usingCredentials ? (engine === 'mssql' ? 'SQL login (stored credentials)' : 'stored credentials') : engine === 'postgres' ? 'peer auth as postgres' : engine === 'mongo' ? 'localhost (no auth)' : 'root via unix socket'}</span> : <span className="text-warn-fg">{engine === 'mssql' && !st.usingCredentials ? 'login required' : 'failed'}</span>]
   ]
   for (const [k, v] of Object.entries(st.details ?? {})) if (v) rows.push([k.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/^./, (c) => c.toUpperCase()), <span className="font-mono text-xs">{v}</span>])
 
@@ -696,7 +696,7 @@ function DatabasesTable({ serverId, engine, dbs, onBrowse, onCredentials }: { se
           <Button size="xs" variant="ghost" icon={<Archive size={11} />} onClick={() => backup(d)}>
             Backup
           </Button>
-          <Button size="xs" variant="ghost" className="text-red-300" icon={<Trash2 size={11} />} disabled={d.system} onClick={() => drop(d)}>
+          <Button size="xs" variant="ghost" className="text-danger-fg" icon={<Trash2 size={11} />} disabled={d.system} onClick={() => drop(d)}>
             Drop
           </Button>
         </div>
@@ -850,7 +850,7 @@ function UsersTable({ serverId, engine, dbs, onCredentials }: { serverId: string
           <Button size="xs" variant="ghost" icon={<KeyRound size={11} />} onClick={() => setPwFor(u)} disabled={!u.user}>
             Password
           </Button>
-          <Button size="xs" variant="ghost" className="text-red-300" icon={<Trash2 size={11} />} onClick={() => drop(u)} disabled={u.user === 'root' || u.user === 'postgres' || u.user.toLowerCase() === 'sa'}>
+          <Button size="xs" variant="ghost" className="text-danger-fg" icon={<Trash2 size={11} />} onClick={() => drop(u)} disabled={u.user === 'root' || u.user === 'postgres' || u.user.toLowerCase() === 'sa'}>
             Drop
           </Button>
         </div>
@@ -1109,7 +1109,7 @@ function BackupsPanel({ serverId, engine, dbs, summary }: { serverId: string; en
           <Button size="xs" variant="ghost" icon={<Upload size={11} />} disabled={b.engine !== engine} onClick={() => setRestoreOf(b)}>
             Restore
           </Button>
-          <Button size="xs" variant="ghost" className="text-red-300" icon={<Trash2 size={11} />} onClick={() => del(b)}>
+          <Button size="xs" variant="ghost" className="text-danger-fg" icon={<Trash2 size={11} />} onClick={() => del(b)}>
             Delete
           </Button>
         </div>
@@ -1264,7 +1264,7 @@ function ResultGrid({
             {columns.map((c) => (
               <th key={c} onClick={() => onSort?.(c)} className={cls('font-medium px-2.5 py-1.5 border-b border-border whitespace-nowrap select-none', onSort && 'cursor-pointer hover:text-text')}>
                 {c}
-                {pk?.includes(c) && <KeyRound size={9} className="inline ml-1 text-amber-300" />}
+                {pk?.includes(c) && <KeyRound size={9} className="inline ml-1 text-warn-fg" />}
                 {sort?.col === c && <span className="ml-1 text-dim">{sort.dir === 'asc' ? '↑' : '↓'}</span>}
               </th>
             ))}
@@ -1282,7 +1282,7 @@ function ResultGrid({
             <tr key={ri} className="border-b border-border/60 hover:bg-panel-2/60">
               {onDelete && (
                 <td className="px-1 text-center">
-                  <button title="Delete row" onClick={() => onDelete(ri)} className="text-dim hover:text-red-300">
+                  <button title="Delete row" onClick={() => onDelete(ri)} className="text-dim hover:text-danger-fg">
                     <Trash2 size={11} />
                   </button>
                 </td>
@@ -1313,7 +1313,7 @@ function ResultGrid({
                         <button title="Set NULL" onClick={() => setEdit({ ...edit, isNull: !edit.isNull })} className={cls('text-[10px] px-1 rounded border', edit.isNull ? 'border-accent text-accent' : 'border-border text-dim hover:text-text')}>
                           NULL
                         </button>
-                        <button title="Save (Enter)" onClick={() => void commit()} className="text-green-300" disabled={saving}>
+                        <button title="Save (Enter)" onClick={() => void commit()} className="text-ok-fg" disabled={saving}>
                           {saving ? <Spinner size={11} /> : <Play size={11} />}
                         </button>
                         <button title="Cancel (Esc)" onClick={() => setEdit(null)} className="text-dim hover:text-text">
@@ -1420,7 +1420,7 @@ function DataBrowser({ serverId, engine, db, onCredentials }: { serverId: string
                 }}
                 className={cls('w-full text-left px-3 py-1.5 flex items-center gap-2 text-xs border-b border-border/40 hover:bg-panel-2', table === t.name && 'bg-accent/15')}
               >
-                <Table2 size={12} className={t.type === 'view' ? 'text-sky-300' : 'text-muted'} />
+                <Table2 size={12} className={t.type === 'view' ? 'text-info-fg' : 'text-muted'} />
                 <span className="font-mono truncate flex-1">{t.name}</span>
                 <span className="text-dim tabular-nums">{t.rows !== undefined ? `~${t.rows.toLocaleString()}` : ''}</span>
                 <span className="text-dim w-14 text-right">{t.sizeBytes !== undefined ? fmtBytes(t.sizeBytes, 0) : ''}</span>
@@ -1521,7 +1521,7 @@ function DataBrowser({ serverId, engine, db, onCredentials }: { serverId: string
             <div className="flex items-center gap-2 px-3 h-10 border-t border-border text-xs text-muted">
               {rows.loading && <Spinner size={12} />}
               <span>
-                {data ? `${offset + 1}–${offset + data.rows.length}` : '—'}
+                {data ? (data.rows.length ? `${offset + 1}–${offset + data.rows.length}` : '0') : '—'}
                 {total !== undefined && ` of ${data?.totalIsEstimate ? '~' : ''}${total.toLocaleString()}`}
               </span>
               <div className="flex-1" />
@@ -1638,7 +1638,7 @@ function SqlEditor({ serverId, engine, db, onCredentials }: { serverId: string; 
           {result && (
             <span className="ml-auto text-muted">
               {result.columns.length ? `${result.rows.length.toLocaleString()} row${result.rows.length === 1 ? '' : 's'}` : result.affected !== undefined ? `${result.affected.toLocaleString()} row${result.affected === 1 ? '' : 's'} affected` : 'OK'} · {result.ms} ms
-              {result.truncated && <span className="text-amber-300"> · output truncated</span>}
+              {result.truncated && <span className="text-warn-fg"> · output truncated</span>}
             </span>
           )}
         </div>
@@ -1686,7 +1686,7 @@ function MongoBrowser({ serverId, db, onCredentials }: { serverId: string; db: s
     await cols.reload()
   }
   const dropColl = async (c: MongoCollection): Promise<void> => {
-    if (!(await confirm({ title: `Drop collection ${c.name}`, message: <>{c.count.toLocaleString()} documents in <b className="font-mono">{db}.{c.name}</b> will be deleted permanently.</>, danger: true, confirmLabel: 'Drop collection', typeToConfirm: c.name }))) return
+    if (!(await confirm({ title: `Drop collection ${c.name}`, message: <>{c.count >= 0 ? `${c.count.toLocaleString()} documents` : 'All documents'} in <b className="font-mono">{db}.{c.name}</b> will be deleted permanently.</>, danger: true, confirmLabel: 'Drop collection', typeToConfirm: c.name }))) return
     await run(() => api.call('db:mongo:dropCollection', serverId, db, c.name), { success: `Dropped ${c.name}` })
     if (coll === c.name) setColl('')
     await cols.reload()
@@ -1740,7 +1740,7 @@ function MongoBrowser({ serverId, db, onCredentials }: { serverId: string; db: s
                   <span className="text-dim tabular-nums">{c.count >= 0 ? c.count.toLocaleString() : '?'}</span>
                   <span className="text-dim w-14 text-right">{fmtBytes(c.sizeBytes, 0)}</span>
                 </button>
-                <button onClick={() => dropColl(c)} title="Drop collection" className="text-dim hover:text-red-300 opacity-0 group-hover:opacity-100">
+                <button onClick={() => dropColl(c)} title="Drop collection" className="text-dim hover:text-danger-fg opacity-0 group-hover:opacity-100">
                   <Trash2 size={11} />
                 </button>
               </div>
@@ -1814,7 +1814,7 @@ function MongoBrowser({ serverId, db, onCredentials }: { serverId: string; db: s
                     <Pre maxH="max-h-64" className="pr-8">
                       {d}
                     </Pre>
-                    <button onClick={() => delDoc(i)} title="Delete document" className="absolute top-2 right-2 text-dim hover:text-red-300 opacity-0 group-hover:opacity-100">
+                    <button onClick={() => delDoc(i)} title="Delete document" className="absolute top-2 right-2 text-dim hover:text-danger-fg opacity-0 group-hover:opacity-100">
                       <Trash2 size={12} />
                     </button>
                   </div>
@@ -1824,7 +1824,7 @@ function MongoBrowser({ serverId, db, onCredentials }: { serverId: string; db: s
             <div className="flex items-center gap-2 px-3 h-10 border-t border-border text-xs text-muted">
               {docs.loading && <Spinner size={12} />}
               <span>
-                {docs.data ? `${offset + 1}–${offset + docs.data.docs.length} of ${docs.data.total.toLocaleString()}` : '—'}
+                {docs.data ? `${docs.data.docs.length ? `${offset + 1}–${offset + docs.data.docs.length}` : '0'} of ${docs.data.total.toLocaleString()}` : '—'}
               </span>
               <div className="flex-1" />
               <Button size="xs" variant="ghost" icon={<ChevronLeft size={12} />} disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}>

@@ -81,7 +81,7 @@ export default function Tunnels({ serverId }: PageProps): React.JSX.Element {
                       <Dot status={t.status === 'up' ? 'ok' : t.status === 'starting' ? 'warn' : t.status === 'error' ? 'danger' : 'muted'} />
                       <div className="min-w-0">
                         <div className="font-medium truncate">{t.name}</div>
-                        {t.error && <div className="text-[11px] text-red-300 truncate" title={t.error}>{t.error}</div>}
+                        {t.error && <div className="text-[11px] text-danger-fg truncate" title={t.error}>{t.error}</div>}
                       </div>
                     </div>
                   ),
@@ -117,7 +117,7 @@ export default function Tunnels({ serverId }: PageProps): React.JSX.Element {
                       ) : (
                         <Button size="xs" variant="ghost" icon={<Play size={12} />} title="Start" onClick={() => act(() => api.global('tunnels:start', t.id), 'Tunnel started')} />
                       )}
-                      <Button size="xs" variant="ghost" icon={<Trash2 size={12} />} title="Delete" className="hover:text-red-300" onClick={() => remove(t)} />
+                      <Button size="xs" variant="ghost" icon={<Trash2 size={12} />} title="Delete" className="hover:text-danger-fg" onClick={() => remove(t)} />
                     </div>
                   )
                 }

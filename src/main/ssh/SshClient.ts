@@ -245,6 +245,8 @@ export class SshClient extends EventEmitter {
     }
     const timeoutMs = opts.timeoutMs ?? 120000
     const maxBuffer = opts.maxBuffer ?? 8 * 1024 * 1024
+    // A cancelled task must not start further commands (the abort listener below only fires on a later abort).
+    if (opts.signal?.aborted) throw new SshError('ABORTED', 'Cancelled')
     return new Promise<ExecResult>((resolve, reject) => {
       c.exec(cmd, { pty: opts.pty ? { term: 'xterm', cols: 200, rows: 50 } : undefined }, (err, stream) => {
         if (err) return reject(new SshError('EXEC', err.message))
@@ -254,12 +256,17 @@ export class SshClient extends EventEmitter {
         let code = -1
         let signal: string | undefined
         let timer: NodeJS.Timeout | undefined
+        let onAbort: (() => void) | undefined
         let finished = false
         let sawPrompt = false
+        const cleanup = (): void => {
+          if (timer) clearTimeout(timer)
+          if (onAbort && opts.signal) opts.signal.removeEventListener('abort', onAbort)
+        }
         const finish = (): void => {
           if (finished) return
           finished = true
-          if (timer) clearTimeout(timer)
+          cleanup()
           let stderr = Buffer.concat(errb).toString('utf8')
           // Strip the sudo prompt token and detect wrong password.
           if (sudoPw !== undefined) {
@@ -289,19 +296,22 @@ export class SshClient extends EventEmitter {
             }
             if (!finished) {
               finished = true
+              cleanup()
               reject(new SshError('TIMEOUT', `Command timed out after ${Math.round(timeoutMs / 1000)}s: ${command.slice(0, 120)}`))
             }
           }, timeoutMs)
         }
         if (opts.signal) {
-          opts.signal.addEventListener('abort', () => {
+          // Removed again in cleanup(): a task reuses one signal for many commands, so listeners must not accumulate.
+          onAbort = (): void => {
             try {
               stream.signal('TERM')
               stream.close()
             } catch {
               /* ignore */
             }
-          })
+          }
+          opts.signal.addEventListener('abort', onAbort, { once: true })
         }
         stream.on('data', (d: Buffer) => {
           if (outLen < maxBuffer) {
@@ -323,6 +333,7 @@ export class SshClient extends EventEmitter {
         stream.on('error', (e: Error) => {
           if (!finished) {
             finished = true
+            cleanup()
             reject(new SshError('EXEC', e.message))
           }
         })

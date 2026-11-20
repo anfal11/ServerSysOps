@@ -7,17 +7,27 @@ import { Badge, Button, Callout, Card, Checkbox, ErrorBox, Field, Input, KV, Loa
 import { cls, fmtBytes, fmtDate, fmtPct, fmtRate, fmtUptime } from '@/lib/format'
 import type { CleanupScan, OverviewSnapshot, QuickActionsState } from '@shared/types'
 
+/** Sparkline history survives page switches. */
+const historyCache = new Map<string, OverviewSnapshot[]>()
+
 type Dialog = null | 'sshport' | 'sshlogin' | 'power' | 'updates' | 'fail2ban' | 'hostname' | 'timezone' | 'swap' | 'cleanup'
 
 export default function Overview({ serverId }: PageProps): React.JSX.Element {
   const interval = useApp((s) => s.settings.metricsIntervalMs)
-  const snap = useAsync(() => api.call<OverviewSnapshot>('overview:snapshot', serverId), [serverId], { intervalMs: interval })
-  const qa = useAsync(() => api.call<QuickActionsState>('qa:state', serverId), [serverId])
+  // cacheKey: the last snapshot / quick-action state is shown instantly when coming back to this
+  // page, and refreshed in the background (no spinner while the ~2-5 s probe scripts run).
+  const snap = useAsync(() => api.call<OverviewSnapshot>('overview:snapshot', serverId), [serverId], { intervalMs: interval, cacheKey: `overview:${serverId}` })
+  const qa = useAsync(() => api.call<QuickActionsState>('qa:state', serverId), [serverId], { cacheKey: `qa:${serverId}` })
   const [dialog, setDialog] = useState<Dialog>(null)
-  const [history, setHistory] = useState<OverviewSnapshot[]>([])
+  const [history, setHistory] = useState<OverviewSnapshot[]>(() => historyCache.get(serverId) ?? [])
   useEffect(() => {
-    if (snap.data) setHistory((h) => [...h.slice(-59), snap.data as OverviewSnapshot])
-  }, [snap.data])
+    if (!snap.data) return
+    setHistory((h) => {
+      const next = h[h.length - 1]?.ts === snap.data!.ts ? h : [...h.slice(-59), snap.data as OverviewSnapshot]
+      historyCache.set(serverId, next)
+      return next
+    })
+  }, [snap.data, serverId])
 
   const d = snap.data
   const q = qa.data

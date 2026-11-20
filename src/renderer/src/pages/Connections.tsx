@@ -299,8 +299,8 @@ function ServerForm({ server, onClose }: { server: ServerProfile | null; onClose
         <div className="mt-4">
           {testResult.ok ? (
             <Callout>
-              <b className="text-green-300">Connected.</b> {testResult.os?.prettyName} · kernel {testResult.os?.kernel} · {testResult.os?.arch} · package manager {testResult.os?.pkgManager}
-              {testResult.os?.isRoot ? ' · logged in as root' : testResult.sudoOk ? ' · sudo works' : <span className="text-amber-300"> · sudo password not accepted (root features will fail)</span>}
+              <b className="text-ok-fg">Connected.</b> {testResult.os?.prettyName} · kernel {testResult.os?.kernel} · {testResult.os?.arch} · package manager {testResult.os?.pkgManager}
+              {testResult.os?.isRoot ? ' · logged in as root' : testResult.sudoOk ? ' · sudo works' : <span className="text-warn-fg"> · sudo password not accepted (root features will fail)</span>}
             </Callout>
           ) : (
             <Callout kind="danger">

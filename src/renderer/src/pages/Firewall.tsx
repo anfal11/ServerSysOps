@@ -241,7 +241,7 @@ export default function Firewall({ serverId }: PageProps): React.JSX.Element {
                     ['State', <Badge color={state.active ? 'ok' : 'warn'}>{state.active ? 'active' : 'inactive'}</Badge>],
                     ['Starts at boot', state.enabledAtBoot ? 'yes' : 'no'],
                     ['SSH port', <span className="font-mono">{state.sshPorts.join(', ')}</span>],
-                    ['SSH allowed', state.sshAllowed ? <span className="text-green-300 flex items-center gap-1"><Check size={12} /> yes</span> : <span className="text-amber-300">no rule</span>],
+                    ['SSH allowed', state.sshAllowed ? <span className="text-ok-fg flex items-center gap-1"><Check size={12} /> yes</span> : <span className="text-warn-fg">no rule</span>],
                     ...(state.backend === 'firewalld' ? ([['Default zone', <span className="font-mono">{state.defaultZone}</span>]] as [React.ReactNode, React.ReactNode][]) : []),
                     ['Rules', state.rules.length]
                   ]}
@@ -310,7 +310,7 @@ export default function Firewall({ serverId }: PageProps): React.JSX.Element {
               <BlockedCard serverId={serverId} state={state} />
             </div>
 
-            <Card title={<span className="text-red-300">Danger zone</span>}>
+            <Card title={<span className="text-danger-fg">Danger zone</span>}>
               <div className="flex items-center justify-between gap-4">
                 <div className="text-xs text-muted">
                   Reset deletes all rules, disables the firewall and re-adds only the SSH allow rule ({state.sshPorts.join(', ')}). Useful when the rule set has become a mess.
@@ -362,14 +362,14 @@ function PresetButton({ preset, onAdd, onRemove, disabled }: { preset: FirewallP
     >
       <button disabled={disabled || preset.allowed} onClick={onAdd} className="text-left disabled:cursor-default">
         <div className="flex items-center gap-1.5 text-[13px] font-medium">
-          {preset.allowed && <Check size={13} className="text-green-300" />}
+          {preset.allowed && <Check size={13} className="text-ok-fg" />}
           {preset.custom && <Plus size={13} className="text-muted" />}
           {preset.label}
         </div>
         <div className="text-[11px] text-dim truncate">{preset.description}</div>
       </button>
       {preset.allowed && hover && (
-        <button onClick={onRemove} disabled={disabled} className="absolute top-1 right-1 text-dim hover:text-red-300 p-1" title="Remove this rule">
+        <button onClick={onRemove} disabled={disabled} className="absolute top-1 right-1 text-dim hover:text-danger-fg p-1" title="Remove this rule">
           <X size={13} />
         </button>
       )}
@@ -527,7 +527,7 @@ function BlockedCard({ serverId, state }: { serverId: string; state: FirewallSta
         </Button>
       }
     >
-      {state.logging === 'off' && <div className="px-4 py-2 text-[11px] text-amber-300 border-b border-border">Logging is off; blocked packets are not recorded. Set the log level to low or higher.</div>}
+      {state.logging === 'off' && <div className="px-4 py-2 text-[11px] text-warn-fg border-b border-border">Logging is off; blocked packets are not recorded. Set the log level to low or higher.</div>}
       {counts.length > 0 && (
         <div className="px-4 py-2 text-[11px] text-dim border-b border-border">
           Top sources: {counts.map(([ip, n]) => `${ip} (${n})`).join(' · ')}
@@ -664,14 +664,14 @@ function AddRuleModal({ serverId, backend, initial, onClose, onDone }: { serverI
             <option value="any">any</option>
           </Select>
         </Field>
-        <Field label="Port(s)" className="col-span-3" hint={!portOk ? <span className="text-amber-300">Use 80, 80,443 or 6000:6100</span> : multi && f.proto === 'any' ? <span className="text-amber-300">Lists and ranges need tcp or udp</span> : 'Single port, comma list or range. Empty = any port (needs a source).'}>
+        <Field label="Port(s)" className="col-span-3" hint={!portOk ? <span className="text-warn-fg">Use 80, 80,443 or 6000:6100</span> : multi && f.proto === 'any' ? <span className="text-warn-fg">Lists and ranges need tcp or udp</span> : 'Single port, comma list or range. Empty = any port (needs a source).'}>
           <Input value={f.port} onChange={(e) => set('port', e.target.value)} mono placeholder="443" autoFocus />
         </Field>
-        <Field label="From (IP / CIDR)" className="col-span-3" hint={!fromOk ? <span className="text-amber-300">Invalid address</span> : 'Empty = anywhere'}>
+        <Field label="From (IP / CIDR)" className="col-span-3" hint={!fromOk ? <span className="text-warn-fg">Invalid address</span> : 'Empty = anywhere'}>
           <Input value={f.from} onChange={(e) => set('from', e.target.value)} mono placeholder="203.0.113.0/24" />
         </Field>
         {backend === 'ufw' && (
-          <Field label="To (destination IP, optional)" className="col-span-3" hint={!toOk ? <span className="text-amber-300">Invalid address</span> : 'Restrict to one of the server addresses'}>
+          <Field label="To (destination IP, optional)" className="col-span-3" hint={!toOk ? <span className="text-warn-fg">Invalid address</span> : 'Restrict to one of the server addresses'}>
             <Input value={f.to} onChange={(e) => set('to', e.target.value)} mono placeholder="any" />
           </Field>
         )}

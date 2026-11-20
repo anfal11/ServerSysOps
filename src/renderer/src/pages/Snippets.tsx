@@ -142,11 +142,11 @@ export default function Snippets({ serverId }: PageProps): React.JSX.Element {
               <SearchInput value={search} onChange={setSearch} placeholder="Search snippets" />
               {tags.length > 0 && (
                 <div className="flex flex-wrap gap-1">
-                  <button onClick={() => setTag('')} className={cls('px-1.5 h-5 rounded text-[11px] border', !tag ? 'bg-accent/15 border-accent/30 text-blue-300' : 'border-border-2 text-muted hover:text-text')}>
+                  <button onClick={() => setTag('')} className={cls('px-1.5 h-5 rounded text-[11px] border', !tag ? 'bg-accent/15 border-accent/30 text-accent-fg' : 'border-border-2 text-muted hover:text-text')}>
                     all
                   </button>
                   {tags.map((t) => (
-                    <button key={t} onClick={() => setTag(tag === t ? '' : t)} className={cls('px-1.5 h-5 rounded text-[11px] border', tag === t ? 'bg-accent/15 border-accent/30 text-blue-300' : 'border-border-2 text-muted hover:text-text')}>
+                    <button key={t} onClick={() => setTag(tag === t ? '' : t)} className={cls('px-1.5 h-5 rounded text-[11px] border', tag === t ? 'bg-accent/15 border-accent/30 text-accent-fg' : 'border-border-2 text-muted hover:text-text')}>
                       {t}
                     </button>
                   ))}
@@ -293,7 +293,7 @@ function OutputPane({ title, r, onClose }: { title: string; r: RunResult; onClos
         <>
           {r.stdout && <Pre maxH="max-h-[50vh]">{r.stdout}</Pre>}
           {r.stderr && (
-            <Pre maxH="max-h-60" className={cls('mt-2', r.code !== 0 ? 'text-red-200 border-danger/30' : 'text-amber-200')}>
+            <Pre maxH="max-h-60" className={cls('mt-2', r.code !== 0 ? 'text-danger-fg border-danger/30' : 'text-warn-fg')}>
               {r.stderr}
             </Pre>
           )}
@@ -368,9 +368,9 @@ function MultiRunModal({ serverId, command, sudo, onClose }: { serverId: string;
               </button>
               {open[r.serverId] && (
                 <div className="px-3 pb-3">
-                  {r.error && <div className="text-xs text-red-300 font-mono mb-2">{r.error}</div>}
+                  {r.error && <div className="text-xs text-danger-fg font-mono mb-2">{r.error}</div>}
                   {r.stdout && <Pre maxH="max-h-60">{r.stdout}</Pre>}
-                  {r.stderr && <Pre maxH="max-h-40" className="mt-2 text-amber-200">{r.stderr}</Pre>}
+                  {r.stderr && <Pre maxH="max-h-40" className="mt-2 text-warn-fg">{r.stderr}</Pre>}
                   {!r.stdout && !r.stderr && !r.error && <div className="text-xs text-muted">(no output)</div>}
                 </div>
               )}

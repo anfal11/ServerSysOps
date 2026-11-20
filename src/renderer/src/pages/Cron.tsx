@@ -370,7 +370,7 @@ function ScheduleBuilder({ value, onChange, offsetMin, nowMs }: { value: string;
           </Field>
         )}
       </div>
-      <div className={cls('rounded-md border px-3 py-2 text-xs', valid ? 'bg-bg-2 border-border' : 'bg-danger/10 border-danger/30 text-red-200')}>
+      <div className={cls('rounded-md border px-3 py-2 text-xs', valid ? 'bg-bg-2 border-border' : 'bg-danger/10 border-danger/30 text-danger-fg')}>
         <div className="flex items-center gap-2">
           <code className="font-mono text-text">{expr}</code>
           <span className="text-muted">— {describeCron(expr)}</span>
@@ -597,7 +597,7 @@ function UserCrontabs({ serverId, status, offsetMin }: { serverId: string; statu
         <div className="flex items-center justify-end gap-0.5">
           <IconButton size="xs" title="Edit" icon={<Pencil size={13} />} onClick={() => setEditing(j)} />
           <IconButton size="xs" title="Run now" icon={<Play size={13} />} onClick={() => void runNow(j.command)} />
-          <IconButton size="xs" title="Delete" icon={<Trash2 size={13} />} className="hover:text-red-300" onClick={() => void remove(j)} />
+          <IconButton size="xs" title="Delete" icon={<Trash2 size={13} />} className="hover:text-danger-fg" onClick={() => void remove(j)} />
         </div>
       )
     }

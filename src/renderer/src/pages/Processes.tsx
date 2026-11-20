@@ -69,7 +69,7 @@ function ProcessesTab({ serverId, active, onSummary }: { serverId: string; activ
         message: (
           <>
             Send <b>SIG{sig}</b> to PID <b>{p.pid}</b> (<code className="font-mono">{p.command}</code>, user {p.user})?
-            {sig === 'KILL' && <div className="text-amber-300 mt-2">SIGKILL cannot be caught: the process ends immediately without cleanup.</div>}
+            {sig === 'KILL' && <div className="text-warn-fg mt-2">SIGKILL cannot be caught: the process ends immediately without cleanup.</div>}
           </>
         ),
         danger: true,
@@ -84,7 +84,7 @@ function ProcessesTab({ serverId, active, onSummary }: { serverId: string; activ
   const columns: Column<ProcessInfo>[] = [
     { key: 'pid', header: 'PID', width: '80px', mono: true, sortValue: (p) => p.pid, render: (p) => p.pid },
     { key: 'user', header: 'User', width: '120px', sortValue: (p) => p.user, render: (p) => <span className="truncate block max-w-[120px]" title={p.user}>{p.user}</span> },
-    { key: 'cpu', header: 'CPU%', width: '80px', align: 'right', mono: true, sortValue: (p) => p.cpu, render: (p) => <span className={cls(p.cpu >= 50 && 'text-amber-300')}>{p.cpu.toFixed(1)}</span> },
+    { key: 'cpu', header: 'CPU%', width: '80px', align: 'right', mono: true, sortValue: (p) => p.cpu, render: (p) => <span className={cls(p.cpu >= 50 && 'text-warn-fg')}>{p.cpu.toFixed(1)}</span> },
     { key: 'mem', header: 'MEM%', width: '80px', align: 'right', mono: true, sortValue: (p) => p.mem, render: (p) => p.mem.toFixed(1) },
     { key: 'rss', header: 'RSS', width: '90px', align: 'right', mono: true, sortValue: (p) => p.rss, render: (p) => fmtBytes(p.rss) },
     { key: 'elapsed', header: 'Uptime', width: '90px', mono: true, sortValue: (p) => elapsedSeconds(p.elapsed), render: (p) => <span className="text-muted">{p.elapsed}</span> },
@@ -94,7 +94,7 @@ function ProcessesTab({ serverId, active, onSummary }: { serverId: string; activ
       sortValue: (p) => p.command,
       render: (p) => (
         <div className="min-w-0 max-w-[640px] truncate font-mono text-xs" title={`${p.command} ${p.args}`.trim()}>
-          <span className={cls('font-semibold', p.stat.startsWith('T') && 'text-amber-300', p.stat.startsWith('Z') && 'text-red-300')}>{p.command}</span>
+          <span className={cls('font-semibold', p.stat.startsWith('T') && 'text-warn-fg', p.stat.startsWith('Z') && 'text-danger-fg')}>{p.command}</span>
           {p.args && <span className="text-dim"> {p.args}</span>}
           {p.stat.startsWith('T') && <Badge color="warn" className="ml-2">stopped</Badge>}
           {p.stat.startsWith('Z') && <Badge color="danger" className="ml-2">zombie</Badge>}
@@ -115,7 +115,7 @@ function ProcessesTab({ serverId, active, onSummary }: { serverId: string; activ
             <IconButton size="xs" title="Pause (SIGSTOP)" icon={<Pause size={13} />} disabled={busy} onClick={() => void signal(p, 'STOP')} />
           )}
           <IconButton size="xs" title="Terminate (SIGTERM)" icon={<Square size={13} />} disabled={busy || p.pid === 1} onClick={() => void signal(p, 'TERM')} />
-          <IconButton size="xs" title="Kill (SIGKILL)" icon={<Skull size={13} />} className="hover:text-red-300" disabled={busy || p.pid === 1} onClick={() => void signal(p, 'KILL')} />
+          <IconButton size="xs" title="Kill (SIGKILL)" icon={<Skull size={13} />} className="hover:text-danger-fg" disabled={busy || p.pid === 1} onClick={() => void signal(p, 'KILL')} />
         </div>
       )
     }
@@ -281,7 +281,7 @@ function ServicesTab({ serverId }: { serverId: string }): React.JSX.Element {
             {a === 'stop' && <>Stop <b>{s.name}</b> now? Clients using it will be disconnected.</>}
             {a === 'disable' && <>Disable <b>{s.name}</b>? It will no longer start at boot (it keeps running until stopped).</>}
             {a === 'mask' && <>Mask <b>{s.name}</b>? It can no longer be started by anything until unmasked.</>}
-            {critical && <div className="text-amber-300 mt-2">This looks like a critical system service. Stopping SSH or networking can lock you out of the server.</div>}
+            {critical && <div className="text-warn-fg mt-2">This looks like a critical system service. Stopping SSH or networking can lock you out of the server.</div>}
           </>
         ),
         danger: true,
@@ -306,7 +306,7 @@ function ServicesTab({ serverId }: { serverId: string }): React.JSX.Element {
       )
     },
     { key: 'description', header: 'Description', sortValue: (s) => s.description, render: (s) => <span className="text-muted text-xs truncate block max-w-[380px]" title={s.description}>{s.description || '—'}</span> },
-    { key: 'load', header: 'Load', width: '90px', sortValue: (s) => s.load, render: (s) => <span className={cls('text-xs', s.load === 'not-found' || s.load === 'error' ? 'text-amber-300' : 'text-muted')}>{s.load}</span> },
+    { key: 'load', header: 'Load', width: '90px', sortValue: (s) => s.load, render: (s) => <span className={cls('text-xs', s.load === 'not-found' || s.load === 'error' ? 'text-warn-fg' : 'text-muted')}>{s.load}</span> },
     {
       key: 'active',
       header: 'Active',
@@ -370,7 +370,7 @@ function ServicesTab({ serverId }: { serverId: string }): React.JSX.Element {
           tabs={[
             { id: 'all', label: 'All', count: counts.all },
             { id: 'running', label: 'Running', count: counts.running },
-            { id: 'failed', label: <span className={cls(counts.failed > 0 && 'text-red-300')}>Failed</span>, count: counts.failed },
+            { id: 'failed', label: <span className={cls(counts.failed > 0 && 'text-danger-fg')}>Failed</span>, count: counts.failed },
             { id: 'enabled', label: 'Enabled', count: counts.enabled }
           ]}
         />
@@ -512,7 +512,7 @@ function PortsTab({ serverId }: { serverId: string }): React.JSX.Element {
 
   const columns: Column<ListeningPort>[] = [
     { key: 'proto', header: 'Proto', width: '70px', sortValue: (p) => p.proto, render: (p) => <Badge color={p.proto.startsWith('tcp') ? 'accent' : 'info'}>{p.proto}</Badge> },
-    { key: 'address', header: 'Address', width: '200px', mono: true, sortValue: (p) => p.address, render: (p) => <span className={cls(p.address === '0.0.0.0' || p.address === '[::]' || p.address === '*' ? 'text-amber-300' : 'text-muted')} title={p.address === '0.0.0.0' || p.address === '[::]' || p.address === '*' ? 'Listening on all interfaces' : undefined}>{p.address}</span> },
+    { key: 'address', header: 'Address', width: '200px', mono: true, sortValue: (p) => p.address, render: (p) => <span className={cls(p.address === '0.0.0.0' || p.address === '[::]' || p.address === '*' ? 'text-warn-fg' : 'text-muted')} title={p.address === '0.0.0.0' || p.address === '[::]' || p.address === '*' ? 'Listening on all interfaces' : undefined}>{p.address}</span> },
     { key: 'port', header: 'Port', width: '80px', mono: true, align: 'right', sortValue: (p) => p.port, render: (p) => <span className="font-semibold">{p.port}</span> },
     { key: 'process', header: 'Process', sortValue: (p) => p.process, render: (p) => <span className="font-mono text-xs">{p.process || <span className="text-dim">unknown (needs root)</span>}</span> },
     { key: 'pid', header: 'PID', width: '80px', mono: true, sortValue: (p) => p.pid ?? 0, render: (p) => p.pid ?? '—' },

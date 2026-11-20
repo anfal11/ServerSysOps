@@ -106,6 +106,18 @@ function createTab(serverId: string, title?: string): TermTab {
   s.tabs.push(tab)
   s.active = tab.id
   term.open(el)
+  // Any native paste event (Win+V clipboard history, Edit menu, drag & drop) goes through our paste
+  // path so bracketed-paste handling and chunking are consistent and nothing is sent twice.
+  el.addEventListener(
+    'paste',
+    (ev) => {
+      ev.preventDefault()
+      ev.stopPropagation()
+      const text = ev.clipboardData?.getData('text/plain') ?? ''
+      if (text) pasteText(serverId, tab, text)
+    },
+    true
+  )
   // Clipboard shortcuts: Ctrl+Shift+C / Ctrl+Shift+V, and Ctrl+C copies when there is a selection.
   term.attachCustomKeyEventHandler((ev) => {
     if (ev.type !== 'keydown') return true
@@ -116,6 +128,10 @@ function createTab(serverId: string, title?: string): TermTab {
     }
     const isPasteKey = (ev.ctrlKey && ev.key.toLowerCase() === 'v') || (ev.shiftKey && ev.key === 'Insert')
     if (isPasteKey) {
+      // preventDefault stops the browser's own "paste" event, which xterm also listens to; without
+      // it the text arrived twice (once from us, once from xterm's native paste handler).
+      ev.preventDefault()
+      ev.stopPropagation()
       void pasteClipboard(serverId, tab)
       return false
     }
@@ -169,13 +185,18 @@ function sendText(serverId: string, tab: TermTab, text: string): void {
   for (let i = 0; i < t.length; i += CHUNK) void api.call('terminal:write', serverId, tab.ptyId, t.slice(i, i + CHUNK))
 }
 
+/** Paste text into a tab: bracketed paste when the remote app asked for it, raw otherwise. */
+function pasteText(serverId: string, tab: TermTab, text: string): void {
+  if (!text) return
+  if (tab.term.modes.bracketedPasteMode) tab.term.paste(text)
+  else sendText(serverId, tab, text)
+}
+
 async function pasteClipboard(serverId: string, tab: TermTab): Promise<void> {
   try {
     const text = await navigator.clipboard.readText()
     if (!text) return
-    // Let xterm handle bracketed paste when the remote app enabled it; otherwise send raw.
-    if (tab.term.modes.bracketedPasteMode) tab.term.paste(text)
-    else sendText(serverId, tab, text)
+    pasteText(serverId, tab, text)
   } catch {
     useApp.getState().toast({ kind: 'warn', title: 'Clipboard is empty or not readable' })
   }

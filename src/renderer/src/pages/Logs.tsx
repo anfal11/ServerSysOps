@@ -26,6 +26,19 @@ function fmtTs(ts: number): string {
   return `${d.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' })} ${d.toLocaleTimeString(undefined, { hour12: false })}`
 }
 
+/** Row-key function that disambiguates rows whose natural key repeats (identical log lines in the same second). */
+function uniqueKeys<T>(rows: T[], key: (r: T) => string): (r: T) => string {
+  const keys = new Map<T, string>()
+  const seen = new Map<string, number>()
+  for (const r of rows) {
+    const k = key(r)
+    const n = seen.get(k) ?? 0
+    seen.set(k, n + 1)
+    keys.set(r, n ? `${k}#${n}` : k)
+  }
+  return (r) => keys.get(r) ?? key(r)
+}
+
 export default function Logs({ serverId }: PageProps): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('journal')
   const hasSystemd = useApp((s) => s.connections[serverId]?.os?.hasSystemd ?? true)
@@ -217,7 +230,7 @@ function JournalTab({ serverId, hasSystemd }: { serverId: string; hasSystemd: bo
       <div className="text-[11px] text-dim mt-1.5 flex items-center gap-3">
         <span>{entries.length} entries</span>
         {follow && (
-          <span className="flex items-center gap-1 text-green-300">
+          <span className="flex items-center gap-1 text-ok-fg">
             <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse" /> following (polls every 2 s)
           </span>
         )}
@@ -408,7 +421,7 @@ function KernelTab({ serverId }: { serverId: string }): React.JSX.Element {
         <ErrorBox error={error} onRetry={reload} />
       ) : (
         <pre ref={preRef} className="flex-1 min-h-0 overflow-auto bg-bg-2 border border-border rounded-md p-3 text-xs font-mono whitespace-pre-wrap break-words">
-          {loading && !data ? 'Loading…' : shown.map((l, i) => <div key={i} className={cls(/error|fail|oom|segfault|panic|bug/i.test(l) && 'text-red-300', /warn/i.test(l) && 'text-amber-300')}>{l}</div>)}
+          {loading && !data ? 'Loading…' : shown.map((l, i) => <div key={i} className={cls(/error|fail|oom|segfault|panic|bug/i.test(l) && 'text-danger-fg', /warn/i.test(l) && 'text-warn-fg')}>{l}</div>)}
         </pre>
       )}
     </>
@@ -429,6 +442,7 @@ function AuthTab({ serverId }: { serverId: string }): React.JSX.Element {
     const f = filter.trim().toLowerCase()
     return (data?.events ?? []).filter((e) => kinds[e.kind] && (!f || (e.user ?? '').toLowerCase().includes(f) || (e.ip ?? '').includes(f) || e.msg.toLowerCase().includes(f)))
   }, [data, kinds, filter])
+  const rowKey = useMemo(() => uniqueKeys(rows, (e) => `${e.ts}-${e.kind}-${e.ip ?? ''}-${e.user ?? ''}-${e.msg}`), [rows])
   if (error) return <ErrorBox error={error} onRetry={reload} />
   if (loading && !data) return <Loading />
   return (
@@ -442,7 +456,7 @@ function AuthTab({ serverId }: { serverId: string }): React.JSX.Element {
               {data.topIps.map((t) => (
                 <div key={t.ip} className="flex items-center justify-between gap-2">
                   <span className="truncate">{t.ip}</span>
-                  <span className="text-red-300">{t.count}</span>
+                  <span className="text-danger-fg">{t.count}</span>
                 </div>
               ))}
             </div>
@@ -470,7 +484,7 @@ function AuthTab({ serverId }: { serverId: string }): React.JSX.Element {
       <Card flush className="flex-1 min-h-0 overflow-auto">
         <Table<AuthEvent>
           rows={rows}
-          rowKey={(e, ) => `${e.ts}-${e.kind}-${e.ip ?? ''}-${e.user ?? ''}-${e.msg.length}`}
+          rowKey={rowKey}
           dense
           empty="No matching events"
           columns={[

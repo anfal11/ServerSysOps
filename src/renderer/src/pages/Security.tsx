@@ -21,10 +21,10 @@ const GROUP_META: Record<Status, { title: string; color: 'danger' | 'warn' | 'ok
 }
 
 function scoreColor(score: number): string {
-  return score >= 85 ? 'text-green-300' : score >= 60 ? 'text-amber-300' : 'text-red-300'
+  return score >= 85 ? 'text-ok-fg' : score >= 60 ? 'text-warn-fg' : 'text-danger-fg'
 }
 function scoreStroke(score: number): string {
-  return score >= 85 ? '#22c55e' : score >= 60 ? '#f59e0b' : '#ef4444'
+  return score >= 85 ? 'var(--color-ok)' : score >= 60 ? 'var(--color-warn)' : 'var(--color-danger)'
 }
 function grade(score: number): string {
   return score >= 90 ? 'Excellent' : score >= 75 ? 'Good' : score >= 60 ? 'Needs attention' : 'At risk'
@@ -218,7 +218,7 @@ export default function Security({ serverId }: PageProps): React.JSX.Element {
             {counts.fail === 0 && counts.warn === 0 && (
               <div className="mb-4">
                 <Callout>
-                  <b className="text-green-300">All checks passed.</b> Keep running the audit regularly — pending updates and new listening services change the picture over time.
+                  <b className="text-ok-fg">All checks passed.</b> Keep running the audit regularly — pending updates and new listening services change the picture over time.
                 </Callout>
               </div>
             )}
@@ -233,7 +233,7 @@ export default function Security({ serverId }: PageProps): React.JSX.Element {
                   className="mb-4"
                   title={
                     <span className="flex items-center gap-2">
-                      <span className={cls('[&>svg]:w-3.5 [&>svg]:h-3.5', st === 'fail' ? 'text-red-300' : st === 'warn' ? 'text-amber-300' : st === 'pass' ? 'text-green-300' : 'text-sky-300')}>{meta.icon}</span>
+                      <span className={cls('[&>svg]:w-3.5 [&>svg]:h-3.5', st === 'fail' ? 'text-danger-fg' : st === 'warn' ? 'text-warn-fg' : st === 'pass' ? 'text-ok-fg' : 'text-info-fg')}>{meta.icon}</span>
                       {meta.title}
                     </span>
                   }
@@ -288,7 +288,7 @@ function Trend({ history }: { history: SecurityHistoryEntry[] }): React.JSX.Elem
       </div>
       <div className="text-xs text-muted w-28 shrink-0">
         <div>
-          Trend: <span className={cls('font-medium', delta > 0 ? 'text-green-300' : delta < 0 ? 'text-red-300' : 'text-text')}>{delta > 0 ? '+' : ''}{delta}</span>
+          Trend: <span className={cls('font-medium', delta > 0 ? 'text-ok-fg' : delta < 0 ? 'text-danger-fg' : 'text-text')}>{delta > 0 ? '+' : ''}{delta}</span>
         </div>
         <div className="text-dim text-[11px] mt-0.5">since {fmtDate(history[0].ts)}</div>
       </div>

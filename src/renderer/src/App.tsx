@@ -124,7 +124,7 @@ function TabBar(): React.JSX.Element {
           Tasks{running ? ` (${running})` : ''}
         </Button>
         {unack > 0 && (
-          <span className="text-[10px] bg-warn/20 text-amber-300 border border-warn/40 rounded px-1.5 h-5 flex items-center" title="Unacknowledged alerts">
+          <span className="text-[10px] bg-warn/20 text-warn-fg border border-warn/40 rounded px-1.5 h-5 flex items-center" title="Unacknowledged alerts">
             {unack} alert{unack > 1 ? 's' : ''}
           </span>
         )}
@@ -247,7 +247,7 @@ function Disconnected({ serverId }: { serverId: string }): React.JSX.Element {
           <>
             <WifiOff size={28} className="mx-auto text-dim mb-3" />
             <div className="font-medium">{status === 'error' ? 'Connection failed' : 'Not connected'}</div>
-            {conn?.error && <div className="text-red-300 text-xs mt-2 font-mono whitespace-pre-wrap">{conn.error}</div>}
+            {conn?.error && <div className="text-danger-fg text-xs mt-2 font-mono whitespace-pre-wrap">{conn.error}</div>}
             <div className="mt-4">
               <Button variant="primary" icon={<Wifi size={14} />} onClick={() => connect(serverId)}>
                 Connect

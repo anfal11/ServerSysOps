@@ -20,11 +20,11 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 const btnVariant: Record<ButtonVariant, string> = {
-  primary: 'bg-accent hover:bg-accent-2 text-white border-transparent shadow-sm',
+  primary: 'bg-accent hover:bg-accent-2 text-on-accent border-transparent shadow-sm',
   default: 'bg-panel-2 hover:bg-border-2 text-text border-border-2',
   ghost: 'bg-transparent hover:bg-panel-2 text-muted hover:text-text border-transparent',
   subtle: 'bg-transparent hover:bg-panel-2 text-text border-border',
-  danger: 'bg-danger/15 hover:bg-danger/25 text-red-300 border-danger/30'
+  danger: 'bg-danger/15 hover:bg-danger/25 text-danger-fg border-danger/30'
 }
 const btnSize: Record<ButtonSize, string> = {
   xs: 'h-6 px-2 text-[11px] gap-1 rounded',
@@ -123,11 +123,11 @@ export function KV({ rows, className }: { rows: [ReactNode, ReactNode][]; classN
 
 export function Badge({ children, color = 'muted', className }: { children: ReactNode; color?: 'ok' | 'warn' | 'danger' | 'info' | 'muted' | 'accent'; className?: string }): React.JSX.Element {
   const map = {
-    ok: 'bg-ok/15 text-green-300 border-ok/30',
-    warn: 'bg-warn/15 text-amber-300 border-warn/30',
-    danger: 'bg-danger/15 text-red-300 border-danger/30',
-    info: 'bg-info/15 text-sky-300 border-info/30',
-    accent: 'bg-accent/15 text-blue-300 border-accent/30',
+    ok: 'bg-ok/15 text-ok-fg border-ok/30',
+    warn: 'bg-warn/15 text-warn-fg border-warn/30',
+    danger: 'bg-danger/15 text-danger-fg border-danger/30',
+    info: 'bg-info/15 text-info-fg border-info/30',
+    accent: 'bg-accent/15 text-accent-fg border-accent/30',
     muted: 'bg-panel-2 text-muted border-border-2'
   }
   return <span className={cls('inline-flex items-center px-1.5 h-5 rounded text-[11px] font-medium border whitespace-nowrap', map[color], className)}>{children}</span>
@@ -163,7 +163,7 @@ export function EmptyState({ icon, title, description, action }: { icon?: ReactN
 
 export function ErrorBox({ error, onRetry }: { error: unknown; onRetry?: () => void }): React.JSX.Element {
   return (
-    <div className="flex items-start gap-3 bg-danger/10 border border-danger/30 text-red-200 rounded-md p-3 text-xs">
+    <div className="flex items-start gap-3 bg-danger/10 border border-danger/30 text-danger-fg rounded-md p-3 text-xs">
       <AlertTriangle size={16} className="shrink-0 mt-0.5" />
       <div className="flex-1 whitespace-pre-wrap break-words font-mono">{errMsg(error)}</div>
       {onRetry && (
@@ -176,7 +176,7 @@ export function ErrorBox({ error, onRetry }: { error: unknown; onRetry?: () => v
 }
 
 export function Callout({ children, kind = 'info' }: { children: ReactNode; kind?: 'info' | 'warn' | 'danger' }): React.JSX.Element {
-  const map = { info: 'bg-panel-2 border-border-2 text-muted', warn: 'bg-warn/10 border-warn/30 text-amber-200', danger: 'bg-danger/10 border-danger/30 text-red-200' }
+  const map = { info: 'bg-panel-2 border-border-2 text-muted', warn: 'bg-warn/10 border-warn/30 text-warn-fg', danger: 'bg-danger/10 border-danger/30 text-danger-fg' }
   return <div className={cls('border rounded-md px-3 py-2 text-xs leading-relaxed', map[kind])}>{children}</div>
 }
 
@@ -222,7 +222,7 @@ export function Checkbox({ checked, onChange, label, disabled, className }: { ch
         onClick={() => !disabled && onChange(!checked)}
         className={cls('w-4 h-4 rounded border flex items-center justify-center transition-colors', checked ? 'bg-accent border-accent' : 'bg-bg-2 border-border-2')}
       >
-        {checked && <Check size={12} strokeWidth={3} className="text-white" />}
+        {checked && <Check size={12} strokeWidth={3} className="text-on-accent" />}
       </span>
       {label && <span onClick={() => !disabled && onChange(!checked)}>{label}</span>}
     </label>
@@ -240,7 +240,7 @@ export function Toggle({ checked, onChange, label, disabled }: { checked: boolea
         onClick={() => onChange(!checked)}
         className={cls('relative w-9 h-5 rounded-full transition-colors', checked ? 'bg-accent' : 'bg-border-2')}
       >
-        <span className={cls('absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all', checked ? 'left-[18px]' : 'left-0.5')} />
+        <span className={cls('absolute top-0.5 w-4 h-4 rounded-full transition-all shadow-sm', checked ? 'left-[18px] bg-on-accent' : 'left-0.5 bg-text')} />
       </button>
       {label}
     </label>
@@ -515,7 +515,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
               onClose()
               it.onClick?.()
             }}
-            className={cls('w-full flex items-center gap-2 px-3 h-7 text-left hover:bg-border-2 disabled:opacity-40 disabled:hover:bg-transparent', it.danger && 'text-red-300')}
+            className={cls('w-full flex items-center gap-2 px-3 h-7 text-left hover:bg-border-2 disabled:opacity-40 disabled:hover:bg-transparent', it.danger && 'text-danger-fg')}
           >
             <span className="w-4 flex justify-center [&>svg]:w-3.5 [&>svg]:h-3.5">{it.icon}</span>
             {it.label}
@@ -557,13 +557,23 @@ export function MenuButton({ label, items, variant = 'default', size = 'sm', ico
  * Poll/load helper: runs `fn` on mount and whenever deps change; optional interval refresh.
  * Returns { data, error, loading, reload }.
  */
-export function useAsync<T>(fn: () => Promise<T>, deps: unknown[], opts: { intervalMs?: number; enabled?: boolean } = {}): { data: T | undefined; error: unknown; loading: boolean; reload: () => Promise<void>; setData: (d: T) => void } {
-  const [data, setData] = useState<T | undefined>(undefined)
+/** Last successful result per cacheKey, so a page shows its previous data instantly when re-opened. */
+const asyncCache = new Map<string, unknown>()
+
+export function useAsync<T>(fn: () => Promise<T>, deps: unknown[], opts: { intervalMs?: number; enabled?: boolean; cacheKey?: string } = {}): { data: T | undefined; error: unknown; loading: boolean; reload: () => Promise<void>; setData: (d: T) => void } {
+  const cacheKey = opts.cacheKey
+  const [data, setDataState] = useState<T | undefined>(() => (cacheKey ? (asyncCache.get(cacheKey) as T | undefined) : undefined))
   const [error, setError] = useState<unknown>(undefined)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => !(cacheKey && asyncCache.has(cacheKey)))
   const alive = useRef(true)
   const fnRef = useRef(fn)
   fnRef.current = fn
+  const keyRef = useRef(cacheKey)
+  keyRef.current = cacheKey
+  const setData = useCallback((d: T) => {
+    if (keyRef.current) asyncCache.set(keyRef.current, d)
+    setDataState(d)
+  }, [])
   const enabled = opts.enabled ?? true
   const reload = useCallback(async () => {
     try {
@@ -577,11 +587,14 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[], opts: { inter
     } finally {
       if (alive.current) setLoading(false)
     }
-  }, [])
+  }, [setData])
   useEffect(() => {
     alive.current = true
     if (!enabled) return
-    setLoading(true)
+    // When the deps change (e.g. another server) show that key's cached data or a loader.
+    const cached = cacheKey ? (asyncCache.get(cacheKey) as T | undefined) : undefined
+    setDataState(cached)
+    setLoading(cached === undefined)
     void reload()
     let timer: number | undefined
     if (opts.intervalMs) timer = window.setInterval(() => void reload(), opts.intervalMs)

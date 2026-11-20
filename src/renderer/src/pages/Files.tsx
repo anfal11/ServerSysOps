@@ -83,12 +83,12 @@ const TEXT_RE = /\.(txt|md|log|csv|tsv|rst|text|list)$/i
 
 function FileIcon({ row }: { row: FileRow }): React.JSX.Element {
   const s = 15
-  if (row.type === 'dir') return <Folder size={s} className="text-amber-300/90 fill-amber-300/20 shrink-0" />
-  if (row.type === 'symlink') return row.targetIsDir ? <FolderSymlink size={s} className="text-amber-300/90 shrink-0" /> : <Link size={s} className="text-sky-300 shrink-0" />
+  if (row.type === 'dir') return <Folder size={s} className="text-warn-fg/90 fill-warn/20 shrink-0" />
+  if (row.type === 'symlink') return row.targetIsDir ? <FolderSymlink size={s} className="text-warn-fg/90 shrink-0" /> : <Link size={s} className="text-info-fg shrink-0" />
   if (row.type === 'other') return <File size={s} className="text-dim shrink-0" />
-  if (ARCHIVE_RE.test(row.name)) return <FileArchive size={s} className="text-violet-300 shrink-0" />
-  if (IMAGE_RE.test(row.name)) return <Image size={s} className="text-pink-300 shrink-0" />
-  if (CODE_RE.test(row.name)) return <FileCode size={s} className="text-emerald-300 shrink-0" />
+  if (ARCHIVE_RE.test(row.name)) return <FileArchive size={s} className="text-accent-fg shrink-0" />
+  if (IMAGE_RE.test(row.name)) return <Image size={s} className="text-info-fg shrink-0" />
+  if (CODE_RE.test(row.name)) return <FileCode size={s} className="text-ok-fg shrink-0" />
   if (TEXT_RE.test(row.name)) return <FileText size={s} className="text-muted shrink-0" />
   return <File size={s} className="text-muted shrink-0" />
 }
@@ -462,7 +462,8 @@ export default function Files({ serverId }: PageProps): React.JSX.Element {
       ),
       danger: true,
       confirmLabel: 'Delete',
-      typeToConfirm: targets.some((t) => t.type === 'dir' && targets.length === 1) ? undefined : undefined
+      // Deleting many items or a folder is hard to undo: require typing the word first.
+      typeToConfirm: targets.length > 5 || targets.some((t) => t.type === 'dir') ? 'delete' : undefined
     })
     if (!ok) return
     const r = await act('Delete', (s) => api.call('files:delete', serverId, targets.map((t) => t.path), s), { success: `Deleted ${targets.length === 1 ? names[0] : `${targets.length} items`}` })
@@ -708,8 +709,8 @@ export default function Files({ serverId }: PageProps): React.JSX.Element {
             </Button>
             {!isRoot && (
               <div className="flex items-center gap-2 pl-2 ml-1 border-l border-border" title={canSudo ? 'Browse, read and change files as root (sudo)' : 'sudo is not available on this server'}>
-                <ShieldCheck size={14} className={sudo ? 'text-amber-300' : 'text-dim'} />
-                <Toggle checked={sudo} onChange={(v) => setSudo(v)} disabled={!canSudo} label={<span className={cls('text-xs', sudo ? 'text-amber-300 font-medium' : 'text-muted')}>sudo</span>} />
+                <ShieldCheck size={14} className={sudo ? 'text-warn-fg' : 'text-dim'} />
+                <Toggle checked={sudo} onChange={(v) => setSudo(v)} disabled={!canSudo} label={<span className={cls('text-xs', sudo ? 'text-warn-fg font-medium' : 'text-muted')}>sudo</span>} />
               </div>
             )}
             {isRoot && <Badge color="warn">root</Badge>}
@@ -911,7 +912,7 @@ export default function Files({ serverId }: PageProps): React.JSX.Element {
                     </span>
                     <ProgressBar value={pct} className="flex-1" color={t.status === 'failed' ? 'bg-danger' : t.status === 'done' ? 'bg-ok' : undefined} />
                     <span className="text-muted tabular-nums w-40 text-right">
-                      {t.status === 'failed' ? <span className="text-red-300">{t.error ?? 'Failed'}</span> : t.status === 'done' ? 'Done' : `${fmtBytes(t.done)}${t.total ? ` / ${fmtBytes(t.total)} · ${pct.toFixed(0)}%` : ''}`}
+                      {t.status === 'failed' ? <span className="text-danger-fg">{t.error ?? 'Failed'}</span> : t.status === 'done' ? 'Done' : `${fmtBytes(t.done)}${t.total ? ` / ${fmtBytes(t.total)} · ${pct.toFixed(0)}%` : ''}`}
                     </span>
                     {t.status === 'running' ? (
                       <button className="text-dim hover:text-text" title="Cancel" onClick={() => void api.call('files:cancelTransfer', serverId, t.id)}>
@@ -1224,7 +1225,7 @@ function NamePrompt({
           }}
         />
       </Field>
-      {err && value && <div className="text-xs text-red-300 mt-2">{err}</div>}
+      {err && value && <div className="text-xs text-danger-fg mt-2">{err}</div>}
     </Modal>
   )
 }

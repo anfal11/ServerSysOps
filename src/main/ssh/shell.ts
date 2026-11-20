@@ -44,3 +44,32 @@ export function assertAbsPath(p: string): string {
   if (typeof p !== 'string' || !p.startsWith('/') || p.includes('\0')) throw new Error(`Invalid path: ${p}`)
   return p
 }
+
+/**
+ * POSIX sh snippet that prints the *global* sshd configuration lines in the order sshd reads them:
+ * `Include` directives are expanded in place (so /etc/ssh/sshd_config.d/*.conf wins when the Include
+ * sits at the top, as on Ubuntu/Debian), and reading stops at the first `Match` block of each file.
+ * A plain `grep` over all files got this wrong (file order, Match-block overrides) and reported
+ * "PasswordAuthentication no" on servers that accept passwords.
+ */
+export const SSHD_CONFIG_DUMP = `smsshcfg() { [ -r "$1" ] || return 0; awk 'tolower($1)=="match"{exit} {print}' "$1" 2>/dev/null | while IFS= read -r l; do case "$l" in [Ii]nclude*) set -- $l; shift; for p in "$@"; do case "$p" in /*) ;; *) p="/etc/ssh/$p";; esac; for f in $p; do smsshcfg "$f"; done; done;; *) printf '%s\\n' "$l";; esac; done; }; smsshcfg /etc/ssh/sshd_config`
+
+/**
+ * Parse `sshd -T` output or SSHD_CONFIG_DUMP lines into lowercase key → values (first match wins per
+ * key, like sshd; `port` and a few others may legitimately repeat so every value is kept in order).
+ */
+export function parseSshdConfig(lines: string[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  const repeatable = new Set(['port', 'listenaddress', 'hostkey', 'acceptenv', 'subsystem', 'authorizedkeysfile'])
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const m = line.match(/^([A-Za-z0-9]+)\s*(?:=|\s)\s*(.*)$/)
+    if (!m) continue
+    const key = m[1].toLowerCase()
+    const val = m[2].trim().replace(/^"(.*)"$/, '$1')
+    if (!(key in out)) out[key] = [val]
+    else if (repeatable.has(key)) out[key].push(val)
+  }
+  return out
+}

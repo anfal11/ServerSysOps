@@ -79,7 +79,10 @@ export class SessionManager extends EventEmitter {
     } catch (e) {
       const err = e as SshError
       const hk = client.hostKeyVerdict
-      this.clients.delete(serverId)
+      // Release the half-open transport (e.g. OS detection failed after 'ready'). Only drop the map entry when it is
+      // still ours: a second connect() may already have replaced it, and deleting that one would strand a live session.
+      client.disconnect()
+      if (this.clients.get(serverId) === client) this.clients.delete(serverId)
       this.setState(serverId, {
         status: 'error',
         error: err.message,

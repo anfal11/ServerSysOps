@@ -157,7 +157,7 @@ function ServerCard({ serverId, srv, hasSystemd, onChanged, onTest }: { serverId
   return (
     <Card>
       <div className="flex items-start gap-3">
-        <div className="w-9 h-9 rounded-md bg-accent/15 text-blue-300 flex items-center justify-center shrink-0">
+        <div className="w-9 h-9 rounded-md bg-accent/15 text-accent-fg flex items-center justify-center shrink-0">
           <Globe size={18} />
         </div>
         <div className="flex-1 min-w-0">
@@ -380,7 +380,7 @@ function SitesTab({ serverId, srv, host, sites }: { serverId: string; srv: WebSe
       key: 'target',
       header: 'Root / proxy',
       mono: true,
-      render: (s) => (s.proxy ? <span className="text-sky-300">→ {s.proxy}</span> : s.root ? <span className="text-muted">{s.root}</span> : <span className="text-dim">—</span>)
+      render: (s) => (s.proxy ? <span className="text-info-fg">→ {s.proxy}</span> : s.root ? <span className="text-muted">{s.root}</span> : <span className="text-dim">—</span>)
     },
     { key: 'ssl', header: 'SSL', width: '70px', render: (s) => (s.ssl ? <Badge color="ok">SSL</Badge> : <Badge>http</Badge>) },
     {
@@ -402,7 +402,7 @@ function SitesTab({ serverId, srv, host, sites }: { serverId: string; srv: WebSe
             {s.editable ? 'Edit' : 'View'}
           </Button>
           {s.editable && (
-            <Button size="xs" variant="ghost" className="text-red-300" icon={<Trash2 size={11} />} disabled={busy} onClick={() => remove(s)}>
+            <Button size="xs" variant="ghost" className="text-danger-fg" icon={<Trash2 size={11} />} disabled={busy} onClick={() => remove(s)}>
               Delete
             </Button>
           )}
@@ -606,7 +606,7 @@ function NewSiteModal({ serverId, srv, onClose, onCreated }: { serverId: string;
       <div className="grid grid-cols-6 gap-4">
         <Field label="Domains" className="col-span-6" hint="Separate multiple domains with spaces or commas, e.g. example.com www.example.com">
           <Input value={domainsRaw} onChange={(e) => setDomainsRaw(e.target.value)} placeholder="example.com www.example.com" mono autoFocus />
-          {badDomain && <div className="text-[11px] text-red-300 mt-1">Invalid domain: {badDomain}</div>}
+          {badDomain && <div className="text-[11px] text-danger-fg mt-1">Invalid domain: {badDomain}</div>}
         </Field>
         <Field label="Site name" className="col-span-3" hint={`File: ${srv.sitesDir ?? srv.configDir}/${name || '…'}${srv.id === 'apache' || !/sites-available/.test(srv.sitesDir ?? '') ? '.conf' : ''}`}>
           <Input
@@ -872,7 +872,7 @@ function ObtainModal({ serverId, srv, sites, onClose, onStarted }: { serverId: s
         )}
         <Field label="Domains" hint="All domains must resolve to this server and be reachable on port 80 (HTTP-01 challenge).">
           <Input value={domainsRaw} onChange={(e) => setDomainsRaw(e.target.value)} placeholder="example.com www.example.com" mono />
-          {badDomain && <div className="text-[11px] text-red-300 mt-1">Invalid domain: {badDomain}</div>}
+          {badDomain && <div className="text-[11px] text-danger-fg mt-1">Invalid domain: {badDomain}</div>}
         </Field>
         <Field label="E-mail for expiry notices">
           <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@example.com" type="email" />
@@ -1023,14 +1023,14 @@ function LogViewer({ content, kind }: { content: string; kind: 'access' | 'error
       {lines.map((l, i) => {
         let color = ''
         if (kind === 'error') {
-          if (/\[(error|crit|alert|emerg)\]|error|failed/i.test(l)) color = 'text-red-300'
-          else if (/\[(warn|notice)\]|warn/i.test(l)) color = 'text-amber-300'
+          if (/\[(error|crit|alert|emerg)\]|error|failed/i.test(l)) color = 'text-danger-fg'
+          else if (/\[(warn|notice)\]|warn/i.test(l)) color = 'text-warn-fg'
         } else {
           const m = l.match(/"\s(\d{3})\s/)
           const st = m ? Number(m[1]) : 0
-          if (st >= 500) color = 'text-red-300'
-          else if (st >= 400) color = 'text-amber-300'
-          else if (st >= 300) color = 'text-sky-300'
+          if (st >= 500) color = 'text-danger-fg'
+          else if (st >= 400) color = 'text-warn-fg'
+          else if (st >= 300) color = 'text-info-fg'
         }
         return (
           <div key={i} className={cls('whitespace-pre-wrap break-all hover:bg-panel-2/60 px-1', color)}>
@@ -1043,7 +1043,7 @@ function LogViewer({ content, kind }: { content: string; kind: 'access' | 'error
 }
 
 function CountTable({ title, rows, total, mono, colorize }: { title: string; rows: { key: string; count: number }[]; total: number; mono?: boolean; colorize?: boolean }): React.JSX.Element {
-  const statusColor = (k: string): string => (k.startsWith('5') ? 'text-red-300' : k.startsWith('4') ? 'text-amber-300' : k.startsWith('3') ? 'text-sky-300' : k.startsWith('2') ? 'text-green-300' : '')
+  const statusColor = (k: string): string => (k.startsWith('5') ? 'text-danger-fg' : k.startsWith('4') ? 'text-warn-fg' : k.startsWith('3') ? 'text-info-fg' : k.startsWith('2') ? 'text-ok-fg' : '')
   return (
     <div className="min-w-0">
       <div className="text-xs text-muted font-medium mb-1.5">{title}</div>

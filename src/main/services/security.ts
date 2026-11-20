@@ -3,7 +3,7 @@ import { probeLogin } from '../ssh/probe'
 import type { SecurityCheck } from '@shared/types'
 import type { SecurityHistoryEntry, SecurityReportEx } from '@shared/modules/security'
 import { SshClient } from '../ssh/SshClient'
-import { b64Echo, shq } from '../ssh/shell'
+import { SSHD_CONFIG_DUMP, b64Echo, parseSshdConfig, shq } from '../ssh/shell'
 import { JsonStore } from '../store/jsonStore'
 import { getSecrets, getServer } from '../store/servers'
 
@@ -13,8 +13,10 @@ import { getSecrets, getServer } from '../store/servers'
 
 const AUDIT_SCRIPT = `
 echo __HOST; hostname 2>/dev/null
-echo __SSHD; sshd -T 2>/dev/null | grep -iE '^(permitrootlogin|passwordauthentication|pubkeyauthentication|port|maxauthtries|x11forwarding|permitemptypasswords|protocol|logingracetime|clientaliveinterval|allowtcpforwarding) '
-echo __SSHDCFG; grep -ihE '^\\s*(Port|PermitRootLogin|PasswordAuthentication|MaxAuthTries|X11Forwarding|PermitEmptyPasswords|LoginGraceTime)\\s' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null
+export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
+echo __SSHD; sshd -T 2>/dev/null | grep -iE '^(permitrootlogin|passwordauthentication|pubkeyauthentication|kbdinteractiveauthentication|challengeresponseauthentication|authenticationmethods|port|maxauthtries|x11forwarding|permitemptypasswords|protocol|logingracetime|clientaliveinterval|allowtcpforwarding) '
+echo __SSHDME; if [ -n "$SM_USER" ]; then sshd -T -C "user=$SM_USER,host=$(hostname 2>/dev/null || echo localhost),addr=\${SM_ADDR:-127.0.0.1}" 2>/dev/null | grep -iE '^(permitrootlogin|passwordauthentication|pubkeyauthentication|kbdinteractiveauthentication|challengeresponseauthentication|authenticationmethods) '; fi
+echo __SSHDCFG; ${SSHD_CONFIG_DUMP}
 echo __F2B; if command -v fail2ban-client >/dev/null 2>&1; then echo installed; systemctl is-active fail2ban 2>/dev/null || echo inactive; fail2ban-client status sshd 2>/dev/null | grep -E 'Currently banned' | awk '{print $NF}'; else echo missing; fi
 echo __FW; if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then echo "ufw $(ufw status numbered 2>/dev/null | grep -c '^\\[')"; elif systemctl is-active firewalld >/dev/null 2>&1; then echo "firewalld $(firewall-cmd --list-all 2>/dev/null | grep -E '^\\s*(ports|services|rich rules):' | awk -F: '{print $2}' | wc -w)"; elif command -v nft >/dev/null 2>&1 && [ "$(nft list ruleset 2>/dev/null | grep -cE '^\\s+(tcp|udp|ip|ip6|ct|iif|iifname|meta|accept|drop|reject)')" -gt 0 ]; then echo "nftables $(nft list ruleset 2>/dev/null | grep -cE '^\\s+(tcp|udp|ip|ip6|ct|iif|iifname|meta|accept|drop|reject)')"; elif command -v iptables >/dev/null 2>&1 && [ "$(iptables -S 2>/dev/null | grep -vc '^-P')" -gt 0 ]; then echo "iptables $(iptables -S 2>/dev/null | grep -vc '^-P')"; else echo none; fi
 echo __UU; if [ -f /etc/apt/apt.conf.d/20auto-upgrades ]; then grep -E 'Unattended-Upgrade' /etc/apt/apt.conf.d/20auto-upgrades | grep -oE '"[0-9]+"' | tr -d '"' | head -1; elif systemctl is-enabled dnf-automatic.timer >/dev/null 2>&1 || systemctl is-enabled dnf-automatic-install.timer >/dev/null 2>&1; then echo 1; elif command -v apt-get >/dev/null 2>&1 || command -v dnf >/dev/null 2>&1; then echo 0; else echo NA; fi
@@ -100,13 +102,15 @@ function buildReport(out: string, pkgManager: string, durationMs: number): Secur
   }
 
   // ---- sshd effective config
+  // Prefer `sshd -T` (effective, as root). Fall back to the config files in sshd's own read order.
+  const fromT = nonEmpty(s.SSHD).length > 0
+  const parsed = parseSshdConfig(fromT ? nonEmpty(s.SSHD) : nonEmpty(s.SSHDCFG))
   const sshd: Record<string, string> = {}
-  const src = nonEmpty(s.SSHD).length ? nonEmpty(s.SSHD) : nonEmpty(s.SSHDCFG)
-  for (const l of src) {
-    const [k, ...v] = l.trim().split(/\s+/)
-    if (k && !(k.toLowerCase() in sshd)) sshd[k.toLowerCase()] = v.join(' ')
-  }
-  const sshPort = Number(sshd.port) || 22
+  for (const [k, v] of Object.entries(parsed)) sshd[k] = v[0]
+  // Settings that apply to *our* login (Match blocks for this user / address applied).
+  const me = parseSshdConfig(nonEmpty(s.SSHDME))
+  const mine = (k: string): string | undefined => me[k]?.[0]?.toLowerCase()
+  const sshPort = Number(parsed.port?.[0]) || 22
   const haveSshd = Object.keys(sshd).length > 0
   if (!haveSshd) {
     add({ id: 'sshd', title: 'SSH server configuration', status: 'info', detail: 'Could not read the effective sshd configuration (sshd -T failed and no config files were readable).', weight: 0 })
@@ -120,15 +124,28 @@ function buildReport(out: string, pkgManager: string, durationMs: number): Secur
       fixAction: prl === 'yes' ? 'ssh-login' : undefined,
       weight: 6
     })
-    const pwd = (sshd.passwordauthentication ?? 'yes').toLowerCase() === 'yes'
+    // Password logins are possible through PasswordAuthentication *or* keyboard-interactive (PAM),
+    // which is how many distributions actually accept passwords (and how 2FA prompts arrive).
+    const yes = (v: string | undefined, dflt: string): boolean => (v ?? dflt).toLowerCase() === 'yes'
+    const kbdKey = 'kbdinteractiveauthentication' in sshd ? 'kbdinteractiveauthentication' : 'challengeresponseauthentication'
+    const globalPwd = yes(sshd.passwordauthentication, 'yes') || yes(sshd[kbdKey], 'yes')
+    const minePwd = Object.keys(me).length ? yes(mine('passwordauthentication'), sshd.passwordauthentication ?? 'yes') || yes(mine(kbdKey), sshd[kbdKey] ?? 'yes') : globalPwd
+    // AuthenticationMethods "publickey,keyboard-interactive" (2FA) means a key is always required,
+    // so a password alone can never log in even though keyboard-interactive is on.
+    const keyRequired = (am: string | undefined): boolean => !!am && am.trim() !== 'any' && am.trim().split(/\s+/).every((list) => list.split(',').includes('publickey'))
+    const pwd = (globalPwd && !keyRequired(sshd.authenticationmethods)) || (minePwd && !keyRequired(mine('authenticationmethods') ?? sshd.authenticationmethods))
+    const amNote = keyRequired(sshd.authenticationmethods) ? ` · AuthenticationMethods ${sshd.authenticationmethods} requires a key for every login` : ''
+    const how = [sshd.passwordauthentication !== undefined ? `PasswordAuthentication ${sshd.passwordauthentication}` : undefined, sshd[kbdKey] !== undefined ? `${kbdKey === 'kbdinteractiveauthentication' ? 'KbdInteractiveAuthentication' : 'ChallengeResponseAuthentication'} ${sshd[kbdKey]}` : undefined].filter(Boolean).join(', ')
+    const matchNote = Object.keys(me).length && minePwd !== globalPwd ? ` · a Match block ${minePwd ? 'allows' : 'disables'} passwords for your login specifically` : ''
     add({
       id: 'ssh-password',
       title: 'Password authentication',
       status: pwd ? 'warn' : 'pass',
-      detail: pwd ? 'PasswordAuthentication yes — prefer SSH keys and turn passwords off (make sure your key works first)' : 'PasswordAuthentication no — keys only',
+      detail: pwd ? `Passwords are accepted (${how})${matchNote} — prefer SSH keys and turn passwords off once your key works` : `Keys only (${how})${amNote}${matchNote}`,
       fixAction: pwd ? 'ssh-login' : undefined,
       weight: 4
     })
+    if (!fromT) add({ id: 'sshd-source', title: 'SSH settings read from config files', status: 'info', detail: 'sshd -T was not available, so the values above come from /etc/ssh/sshd_config and its includes (Match blocks not evaluated).', weight: 0 })
     add({ id: 'ssh-port', title: 'SSH port', status: 'info', detail: `Port ${sshPort}${sshPort === 22 ? ' (default; a non-standard port reduces log noise but is not a security control)' : ' (non-standard)'}`, weight: 0 })
     const mat = Number(sshd.maxauthtries ?? 6)
     add({ id: 'ssh-maxauth', title: 'MaxAuthTries', status: mat <= 4 ? 'pass' : 'warn', detail: `MaxAuthTries ${mat}${mat > 4 ? ' — recommended 4 or less' : ''}`, fixAction: mat > 4 ? 'ssh-hardening' : undefined, weight: 1 })
@@ -381,7 +398,13 @@ export function register(ctx: Ctx): void {
   ctx.handle('sec:audit', async (serverId: string): Promise<SecurityReportEx> => {
     const ssh = ctx.ssh(serverId)
     const t0 = Date.now()
-    const r = await ssh.sudo(AUDIT_SCRIPT, { timeoutMs: 180000, maxBuffer: 4 * 1024 * 1024 })
+    // Who are we, and from where? Lets the audit evaluate Match blocks for this very login.
+    const who = await ssh.exec(`id -un; echo "$SSH_CLIENT" | awk '{print $1}'`, { timeoutMs: 10000 }).catch(() => ({ stdout: '' }))
+    const [smUser, smAddr] = who.stdout.split('\n').map((l) => l.trim())
+    const env: Record<string, string> = {}
+    if (smUser && /^[A-Za-z0-9._-]+$/.test(smUser)) env.SM_USER = smUser
+    if (smAddr && /^[0-9a-fA-F.:]+$/.test(smAddr)) env.SM_ADDR = smAddr
+    const r = await ssh.sudo(AUDIT_SCRIPT, { timeoutMs: 180000, maxBuffer: 4 * 1024 * 1024, env })
     if (!r.stdout.includes('__END') && !r.stdout.includes('__SSHD')) throw new Error('Audit script produced no output: ' + (r.stderr.trim() || `exit ${r.code}`))
     const report = buildReport(r.stdout, ssh.os?.pkgManager ?? 'unknown', Date.now() - t0)
     const failed = report.checks.filter((c) => c.status === 'fail').length

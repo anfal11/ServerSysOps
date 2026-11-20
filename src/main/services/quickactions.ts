@@ -1,7 +1,7 @@
 import type { Ctx } from '../core'
 import type { CleanupScan, QuickActionsState } from '@shared/types'
 import { SshClient } from '../ssh/SshClient'
-import { assertPort, b64Echo, shq, assertSafeName } from '../ssh/shell'
+import { SSHD_CONFIG_DUMP, assertPort, b64Echo, parseSshdConfig, shq, assertSafeName } from '../ssh/shell'
 import { installCmd, isInstalled, listUpgradable, refreshCmd, runPkg, upgradeAllCmd, pkgEnv } from './pkg'
 import { getServer } from '../store/servers'
 import { probeLogin } from '../ssh/probe'
@@ -59,8 +59,9 @@ export function register(ctx: Ctx): void {
   ctx.handle('qa:state', async (serverId: string): Promise<QuickActionsState> => {
     const ssh = ctx.ssh(serverId)
     const script = `
-echo __SSHDT; sudo -n sshd -T 2>/dev/null | grep -iE '^(port|permitrootlogin|passwordauthentication|pubkeyauthentication) '
-echo __SSHDCFG; grep -ihE '^\\s*(Port|PermitRootLogin|PasswordAuthentication|PubkeyAuthentication)\\s' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null
+export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
+echo __SSHDT; (sshd -T 2>/dev/null || sudo -n sshd -T 2>/dev/null) | grep -iE '^(port|permitrootlogin|passwordauthentication|pubkeyauthentication|kbdinteractiveauthentication|challengeresponseauthentication) '
+echo __SSHDCFG; ${SSHD_CONFIG_DUMP}
 echo __LISTEN; (ss -tlnH 2>/dev/null || netstat -tln 2>/dev/null) | awk '{print $4}' | sed 's/.*://' | sort -un | tr '\\n' ' '
 echo __SOCKET; systemctl is-active ssh.socket 2>/dev/null
 echo __UU; if [ -f /etc/apt/apt.conf.d/20auto-upgrades ]; then grep -E 'Unattended-Upgrade' /etc/apt/apt.conf.d/20auto-upgrades | grep -oE '"[0-9]+"' | tr -d '"'; elif systemctl is-enabled dnf-automatic.timer >/dev/null 2>&1; then echo 1; elif command -v apt-get >/dev/null 2>&1 || command -v dnf >/dev/null 2>&1; then echo 0; else echo NA; fi
@@ -92,14 +93,8 @@ echo __END`
     // SSH_CLIENT is reset by sudo, so read it in the login user's environment.
     const client = await ssh.exec(`echo "$SSH_CLIENT" | awk '{print $1}'`, { timeoutMs: 10000 }).catch(() => ({ stdout: '' }))
     sec.CLIENT = [client.stdout.trim()]
-    const effective: Record<string, string[]> = {}
-    const src = (sec.SSHDT?.filter(Boolean).length ? sec.SSHDT : sec.SSHDCFG) ?? []
-    for (const l of src) {
-      const [k, ...v] = l.trim().split(/\s+/)
-      if (!k) continue
-      const key = k.toLowerCase()
-      ;(effective[key] ??= []).push(v.join(' '))
-    }
+    const src = (sec.SSHDT?.filter((l) => l.trim()).length ? sec.SSHDT : sec.SSHDCFG) ?? []
+    const effective = parseSshdConfig(src)
     const listen = (sec.LISTEN?.[0] ?? '').trim().split(/\s+/).map(Number).filter(Boolean)
     const cfgPorts = (effective.port ?? []).map(Number).filter(Boolean)
     const sshPorts = cfgPorts.length ? cfgPorts : listen.includes(22) ? [22] : []
@@ -131,7 +126,7 @@ echo __END`
       sshPorts,
       sshSocketActivated: (sec.SOCKET?.[0] ?? '').trim() === 'active',
       permitRootLogin: effective.permitrootlogin?.[0] ?? 'prohibit-password',
-      passwordAuth: (effective.passwordauthentication?.[0] ?? 'yes') === 'yes',
+      passwordAuth: (effective.passwordauthentication?.[0] ?? 'yes').toLowerCase() === 'yes' || ((effective.kbdinteractiveauthentication ?? effective.challengeresponseauthentication)?.[0] ?? 'yes').toLowerCase() === 'yes',
       pubkeyAuth: (effective.pubkeyauthentication?.[0] ?? 'yes') === 'yes',
       unattendedUpgrades: uuRaw === 'NA' ? 'unavailable' : uuRaw === '1' ? 'on' : 'off',
       fail2ban: {

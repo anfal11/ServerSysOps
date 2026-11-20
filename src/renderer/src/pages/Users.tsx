@@ -29,6 +29,19 @@ function copyText(s: string): void {
   )
 }
 
+/** Row-key function that disambiguates rows whose natural key repeats (e.g. several failed logins from one IP in the same minute). */
+function uniqueKeys<T>(rows: T[], key: (r: T) => string): (r: T) => string {
+  const keys = new Map<T, string>()
+  const seen = new Map<string, number>()
+  for (const r of rows) {
+    const k = key(r)
+    const n = seen.get(k) ?? 0
+    seen.set(k, n + 1)
+    keys.set(r, n ? `${k}#${n}` : k)
+  }
+  return (r) => keys.get(r) ?? key(r)
+}
+
 function statusOf(u: UserInfoEx): { label: string; color: 'ok' | 'warn' | 'danger' | 'info' | 'muted' } {
   if (u.accountExpired) return { label: 'Locked', color: 'danger' }
   if (u.keyOnly) return { label: 'Key-only', color: 'info' }
@@ -360,7 +373,7 @@ function SessionsTab({ serverId, data, error, loading, reload }: { serverId: str
             { key: 'tty', header: 'TTY', mono: true, render: (s) => s.tty },
             { key: 'from', header: 'From', mono: true, render: (s) => s.from },
             { key: 'since', header: 'Since', mono: true, render: (s) => s.since },
-            { key: 'idle', header: 'Idle', render: (s) => <span className={cls(s.idle === 'active' && 'text-green-300')}>{s.idle ?? '—'}</span> },
+            { key: 'idle', header: 'Idle', render: (s) => <span className={cls(s.idle === 'active' && 'text-ok-fg')}>{s.idle ?? '—'}</span> },
             { key: 'what', header: 'What', mono: true, render: (s) => <span className="text-muted truncate block max-w-[280px]">{s.what ?? ''}</span> },
             { key: 'pid', header: 'PID', mono: true, width: '70px', render: (s) => s.pid ?? '' },
             { key: 'act', header: '', width: '110px', align: 'right', render: (s) => <Button size="xs" variant="danger" icon={<XCircle size={11} />} onClick={() => void kill(s)}>Terminate</Button> }
@@ -409,7 +422,7 @@ function HistoryTab({ serverId, data, error, loading, reload }: { serverId: stri
         <Card title="Recent failed logins" flush>
           <Table
             rows={d.failedRecent}
-            rowKey={(e) => `${e.user}-${e.from}-${e.start}`}
+            rowKey={uniqueKeys(d.failedRecent, (e) => `${e.user}-${e.tty}-${e.from}-${e.start}`)}
             dense
             columns={[
               { key: 'user', header: 'User', mono: true, render: (e) => e.user },
@@ -423,7 +436,7 @@ function HistoryTab({ serverId, data, error, loading, reload }: { serverId: stri
       <Card title={`Last logins (${d.entries.length})`} flush>
         <Table
           rows={d.entries}
-          rowKey={(e) => `${e.user}-${e.tty}-${e.start}-${e.from}`}
+          rowKey={uniqueKeys(d.entries, (e) => `${e.user}-${e.tty}-${e.start}-${e.from}`)}
           dense
           columns={[
             { key: 'user', header: 'User', sortValue: (e) => e.user, render: (e) => <span className="font-medium">{e.user}</span> },
@@ -479,7 +492,7 @@ function CreateUserModal({ serverId, onClose, onDone }: { serverId: string; onCl
       }
     >
       <div className="grid grid-cols-6 gap-4">
-        <Field label="Username" className="col-span-3" hint={f.name && !nameOk ? <span className="text-amber-300">1-32 chars: lowercase letters, digits, "_" or "-"; start with a letter or "_"</span> : 'Lowercase, e.g. deploy'}>
+        <Field label="Username" className="col-span-3" hint={f.name && !nameOk ? <span className="text-warn-fg">1-32 chars: lowercase letters, digits, "_" or "-"; start with a letter or "_"</span> : 'Lowercase, e.g. deploy'}>
           <Input value={f.name} onChange={(e) => set('name', e.target.value.trim())} mono autoFocus placeholder="deploy" />
         </Field>
         <Field label="Full name (optional)" className="col-span-3">
@@ -506,7 +519,7 @@ function CreateUserModal({ serverId, onClose, onDone }: { serverId: string; onCl
         </Field>
         <div className="col-span-6 border border-border rounded-md p-3 space-y-2 bg-bg-2/40">
           <Checkbox checked={f.sudo} onChange={(v) => { set('sudo', v); if (!v) set('passwordlessSudo', false) }} label={<span className="flex items-center gap-2"><Shield size={13} /> Administrator (add to the sudo / wheel group)</span>} />
-          <Checkbox checked={f.passwordlessSudo} onChange={(v) => set('passwordlessSudo', v)} disabled={!f.sudo} label={<>Passwordless sudo (<code>/etc/sudoers.d/servermate-{f.name || 'name'}</code>, validated with <code>visudo -cf</code>)</>} />
+          <Checkbox checked={f.passwordlessSudo} onChange={(v) => set('passwordlessSudo', v)} disabled={!f.sudo} label={<>Passwordless sudo (<code>/etc/sudoers.d/servermate-{(f.name || 'name').replace(/[^A-Za-z0-9_-]/g, '_')}</code>, validated with <code>visudo -cf</code>)</>} />
           {f.passwordlessSudo && <Callout kind="warn">Anyone holding this account's key or password gets root without a second factor. Recommended only for automation accounts with key-only login.</Callout>}
         </div>
       </div>

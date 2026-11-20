@@ -230,8 +230,13 @@ async function validateKeys(ssh: SshClient, keyText: string): Promise<{ raw: str
 /* sudoers helpers                                                     */
 /* ------------------------------------------------------------------ */
 
+/** sudo silently ignores files in /etc/sudoers.d whose name contains a '.' (or ends in '~'), so dots in user names are mapped to '_'. */
+function sudoersDropinPath(name: string): string {
+  return `/etc/sudoers.d/servermate-${name.replace(/[^A-Za-z0-9_-]/g, '_')}`
+}
+
 async function writeSudoersDropin(ssh: SshClient, name: string, content: string): Promise<void> {
-  const path = `/etc/sudoers.d/servermate-${name}`
+  const path = sudoersDropinPath(name)
   await rootRun(
     ssh,
     `set -e; mkdir -p /etc/sudoers.d; if ! grep -qE '^[[:space:]]*[#@]includedir[[:space:]]+/etc/sudoers.d' /etc/sudoers 2>/dev/null; then c=$(mktemp); cat /etc/sudoers > "$c"; printf '\\n#includedir /etc/sudoers.d\\n' >> "$c"; visudo -cf "$c" >/dev/null && install -m 440 -o root -g root "$c" /etc/sudoers; rm -f "$c"; fi; t=$(mktemp); ${b64Echo(content)} > "$t"; if visudo -cf "$t" >/dev/null; then install -m 440 -o root -g root "$t" ${shq(path)}; rm -f "$t"; else rm -f "$t"; echo "sudoers syntax check failed" >&2; exit 1; fi`
@@ -239,7 +244,7 @@ async function writeSudoersDropin(ssh: SshClient, name: string, content: string)
 }
 
 async function removeSudoersDropin(ssh: SshClient, name: string): Promise<void> {
-  await rootExec(ssh, `rm -f ${shq(`/etc/sudoers.d/servermate-${name}`)}`)
+  await rootExec(ssh, `rm -f ${shq(sudoersDropinPath(name))} ${shq(`/etc/sudoers.d/servermate-${name}`)}`)
 }
 
 async function hasSudoRights(ssh: SshClient, name: string): Promise<boolean> {
@@ -458,7 +463,7 @@ echo __END`
     }
     await rootRun(
       ssh,
-      `pkill -KILL -u ${shq(name)} 2>/dev/null; sleep 0.3; rm -f ${shq(`/etc/sudoers.d/servermate-${name}`)}; if command -v userdel >/dev/null 2>&1; then userdel ${opts?.removeHome ? '-r' : ''} ${shq(name)} 2>&1 | grep -v 'mail spool' || true; else deluser ${opts?.removeHome ? '--remove-home' : ''} ${shq(name)}; fi; getent passwd ${shq(name)} >/dev/null && { echo "userdel failed" >&2; exit 1; } || true`,
+      `pkill -KILL -u ${shq(name)} 2>/dev/null; sleep 0.3; rm -f ${shq(sudoersDropinPath(name))} ${shq(`/etc/sudoers.d/servermate-${name}`)}; if command -v userdel >/dev/null 2>&1; then userdel ${opts?.removeHome ? '-r' : ''} ${shq(name)} 2>&1 | grep -v 'mail spool' || true; else deluser ${opts?.removeHome ? '--remove-home' : ''} ${shq(name)}; fi; getent passwd ${shq(name)} >/dev/null && { echo "userdel failed" >&2; exit 1; } || true`,
       { timeoutMs: 600000 }
     )
     const keyOnlyUsers = await readKeyOnlyUsers(ssh)

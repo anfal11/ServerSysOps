@@ -171,7 +171,7 @@ function FleetCard({ s, current, onTest, thresholds }: { s: ServerSample; curren
         </Button>
       </div>
       {s.error ? (
-        <div className="text-[11px] text-red-300 font-mono break-words">{s.error}</div>
+        <div className="text-[11px] text-danger-fg font-mono break-words">{s.error}</div>
       ) : (
         <div className="space-y-1.5">
           <Metric label="CPU" value={s.cpuPct} bar={bar(s.cpuPct, thresholds.alertCpuPct)} sub={s.nproc ? `load ${s.load1.toFixed(2)} / ${s.nproc} cores` : undefined} />

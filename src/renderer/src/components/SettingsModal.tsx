@@ -62,27 +62,32 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
         </Field>
         <div className="col-span-2">
           <div className="text-xs text-muted mb-1.5 font-medium">Colour theme</div>
-          <div className="grid grid-cols-4 gap-2">
-            {THEMES.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => {
-                  set('theme', t.id)
-                  applyTheme(t.id)
-                }}
-                className={cls('relative rounded-md border p-2 text-left transition-colors', draft.theme === t.id ? 'border-accent ring-2 ring-accent/30' : 'border-border-2 hover:border-muted')}
-                style={{ background: t.swatch[0], color: t.swatch[3] }}
-              >
-                <div className="flex gap-1 mb-1.5">
-                  <span className="h-3 flex-1 rounded-sm" style={{ background: t.swatch[1] }} />
-                  <span className="h-3 w-5 rounded-sm" style={{ background: t.swatch[2] }} />
-                </div>
-                <div className="text-[11px] font-medium truncate">{t.name}</div>
-                {draft.theme === t.id && <Check size={12} className="absolute top-1.5 right-1.5" style={{ color: t.swatch[2] }} />}
-              </button>
-            ))}
-          </div>
+          {(['dark', 'light'] as const).map((kind) => (
+            <div key={kind} className="mb-2">
+              <div className="text-[11px] text-dim uppercase tracking-wide mb-1">{kind === 'dark' ? 'Dark' : 'Light'}</div>
+              <div className="grid grid-cols-4 gap-2">
+                {THEMES.filter((t) => t.kind === kind).map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      set('theme', t.id)
+                      applyTheme(t.id)
+                    }}
+                    className={cls('relative rounded-md border p-2 text-left transition-colors', draft.theme === t.id ? 'border-accent ring-2 ring-accent/30' : 'border-border-2 hover:border-muted')}
+                    style={{ background: t.swatch[0], color: t.swatch[3] }}
+                  >
+                    <div className="flex gap-1 mb-1.5">
+                      <span className="h-3 flex-1 rounded-sm" style={{ background: t.swatch[1] }} />
+                      <span className="h-3 w-5 rounded-sm" style={{ background: t.swatch[2] }} />
+                    </div>
+                    <div className="text-[11px] font-medium truncate">{t.name}</div>
+                    {draft.theme === t.id && <Check size={12} className="absolute top-1.5 right-1.5" style={{ color: t.swatch[2] }} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
           <div className="text-[11px] text-dim mt-1.5">Previews immediately; Cancel restores the saved theme.</div>
         </div>
         <div className="col-span-2 flex flex-col gap-2 pt-1">

@@ -28,7 +28,7 @@ Inspired by Serverias, rebuilt from scratch and extended.
 | **Alerts** | Background checks of CPU, memory and disk on all connected servers with thresholds, cooldowns and desktop notifications; fleet overview. |
 | **Activity log** | Local record of every change the app made, per server. |
 
-Also: background tasks with live output, automatic reconnection after drops or sleep, host-key change warnings, jump hosts (bastions), server groups and colours, import/export of profiles (without secrets), settings for metrics interval, terminal font, confirmations and alert thresholds, and **24 colour themes** (16 dark: Graphite, Midnight Blue, Tokyo Night, One Dark, Gruvbox, Dracula, Nord, Catppuccin Mocha, Rosé Pine, Solarized Dark, Deep Ocean, Forest, Ember, Aurora, Monochrome, High Contrast; 8 light: Light, GitHub Light, Paper, Solarized Light, Catppuccin Latte, Mint, Rosé Pine Dawn, Slate) that restyle the whole UI including the terminal.
+Also: background tasks with live output, automatic reconnection after drops or sleep, host-key change warnings, jump hosts (bastions), server groups and colours, import/export of profiles (without secrets), settings for metrics interval, terminal font, confirmations and alert thresholds, and **26 colour themes** (18 dark: Graphite, Slate Dark, Carbon, Midnight Blue, Tokyo Night, One Dark, Gruvbox, Dracula, Nord, Catppuccin Mocha, Rosé Pine, Solarized Dark, Deep Ocean, Forest, Ember, Aurora, Monochrome, High Contrast; 8 light: Light, GitHub Light, Paper, Solarized Light, Catppuccin Latte, Mint, Rosé Pine Dawn, Slate) that restyle the whole UI including the terminal.
 
 ## Download and install (Windows)
 

@@ -85,7 +85,7 @@ function TabBar(): React.JSX.Element {
   return (
     <div className="h-10 bg-bg-2 border-b border-border flex items-stretch shrink-0 drag">
       <div className="flex items-stretch no-drag overflow-x-auto">
-        <button onClick={() => setActiveTab('home')} className={cls('px-3 flex items-center gap-2 border-r border-border text-muted hover:text-text', activeTab === 'home' && 'bg-bg text-text')} title="Servers">
+        <button onClick={() => setActiveTab('home')} className={cls('px-3 flex items-center gap-2 border-r border-border text-muted hover:text-text border-t-2', activeTab === 'home' ? 'bg-bg text-text border-t-accent' : 'border-t-transparent')} title="Servers">
           <Home size={15} />
         </button>
         {tabs
@@ -98,7 +98,7 @@ function TabBar(): React.JSX.Element {
                 key={id}
                 onClick={() => setActiveTab(id)}
                 onAuxClick={(e) => e.button === 1 && closeTab(id)}
-                className={cls('group px-3 flex items-center gap-2 border-r border-border cursor-default min-w-[140px] max-w-[220px]', activeTab === id ? 'bg-bg text-text' : 'text-muted hover:text-text hover:bg-panel')}
+                className={cls('group px-3 flex items-center gap-2 border-r border-border cursor-default min-w-[140px] max-w-[220px] border-t-2', activeTab === id ? 'bg-bg text-text border-t-accent' : 'border-t-transparent text-muted hover:text-text hover:bg-panel')}
               >
                 <Dot status={st === 'connected' ? 'ok' : st === 'connecting' || st === 'reconnecting' ? 'warn' : st === 'error' ? 'danger' : 'muted'} />
                 <span className="truncate text-xs font-medium flex-1">{s?.name ?? 'Server'}</span>
@@ -174,7 +174,7 @@ function ServerView({ serverId }: { serverId: string }): React.JSX.Element {
                 <button
                   key={n.id}
                   onClick={() => setPage(serverId, n.id)}
-                  className={cls('w-full flex items-center gap-2.5 px-4 h-8 text-[13px] text-left [&>svg]:w-4 [&>svg]:h-4 transition-colors', page === n.id ? 'bg-panel-2 text-text font-medium' : 'text-muted hover:text-text hover:bg-panel')}
+                  className={cls('w-full flex items-center gap-2.5 px-4 h-8 text-[13px] text-left [&>svg]:w-4 [&>svg]:h-4 transition-colors border-l-2', page === n.id ? 'bg-accent/10 text-text font-medium border-accent [&>svg]:text-accent' : 'border-transparent text-muted hover:text-text hover:bg-panel')}
                 >
                   {ICONS[n.id]}
                   {n.label}

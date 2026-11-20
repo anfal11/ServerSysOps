@@ -215,7 +215,7 @@ function ServerForm({ server, onClose }: { server: ServerProfile | null; onClose
         <Field label="Color" className="col-span-1">
           <div className="flex flex-wrap gap-1.5 pt-1">
             {COLORS.map((c) => (
-              <button key={c} onClick={() => set('color', c)} className="w-5 h-5 rounded-full border-2" style={{ background: c, borderColor: f.color === c ? 'white' : 'transparent' }} />
+              <button key={c} onClick={() => set('color', c)} className="w-5 h-5 rounded-full border-2" style={{ background: c, borderColor: f.color === c ? 'var(--color-text)' : 'transparent' }} />
             ))}
           </div>
         </Field>

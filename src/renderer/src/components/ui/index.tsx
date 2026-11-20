@@ -20,7 +20,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 const btnVariant: Record<ButtonVariant, string> = {
-  primary: 'bg-accent hover:bg-accent-2 text-on-accent border-transparent shadow-sm',
+  primary: 'bg-accent-fill hover:bg-accent-fill-2 text-on-accent border-transparent shadow-sm',
   default: 'bg-panel-2 hover:bg-border-2 text-text border-border-2',
   ghost: 'bg-transparent hover:bg-panel-2 text-muted hover:text-text border-transparent',
   subtle: 'bg-transparent hover:bg-panel-2 text-text border-border',
@@ -60,7 +60,7 @@ export function IconButton({ title, className, size = 'sm', ...rest }: ButtonPro
 
 export function Card({ title, actions, children, className, bodyClass, flush }: { title?: ReactNode; actions?: ReactNode; children?: ReactNode; className?: string; bodyClass?: string; flush?: boolean }): React.JSX.Element {
   return (
-    <section className={cls('bg-panel border border-border rounded-lg flex flex-col min-w-0', className)}>
+    <section className={cls('bg-panel border border-border rounded-lg flex flex-col min-w-0 shadow-card', className)}>
       {(title || actions) && (
         <header className="flex items-center justify-between px-4 h-11 border-b border-border shrink-0">
           <h3 className="font-semibold text-[13px] truncate">{title}</h3>
@@ -92,7 +92,7 @@ export function Page({ children, className }: { children: ReactNode; className?:
 export function Stat({ label, value, unit, sub, bar, color }: { label: string; value: ReactNode; unit?: string; sub?: ReactNode; bar?: number; color?: string }): React.JSX.Element {
   const c = color ?? (bar !== undefined && bar > 90 ? 'bg-danger' : bar !== undefined && bar > 75 ? 'bg-warn' : 'bg-accent')
   return (
-    <div className="bg-panel border border-border rounded-lg p-4 min-w-0">
+    <div className="bg-panel border border-border rounded-lg p-4 min-w-0 shadow-card">
       <div className="text-muted text-xs mb-1">{label}</div>
       <div className="text-2xl font-semibold tracking-tight">
         {value}
@@ -220,7 +220,7 @@ export function Checkbox({ checked, onChange, label, disabled, className }: { ch
     <label className={cls('inline-flex items-center gap-2 cursor-pointer select-none text-[13px]', disabled && 'opacity-50 cursor-not-allowed', className)}>
       <span
         onClick={() => !disabled && onChange(!checked)}
-        className={cls('w-4 h-4 rounded border flex items-center justify-center transition-colors', checked ? 'bg-accent border-accent' : 'bg-bg-2 border-border-2')}
+        className={cls('w-4 h-4 rounded border flex items-center justify-center transition-colors', checked ? 'bg-accent-fill border-accent-fill' : 'bg-bg-2 border-border-2')}
       >
         {checked && <Check size={12} strokeWidth={3} className="text-on-accent" />}
       </span>
@@ -238,7 +238,7 @@ export function Toggle({ checked, onChange, label, disabled }: { checked: boolea
         aria-checked={checked}
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={cls('relative w-9 h-5 rounded-full transition-colors', checked ? 'bg-accent' : 'bg-border-2')}
+        className={cls('relative w-9 h-5 rounded-full transition-colors', checked ? 'bg-accent-fill' : 'bg-border-2')}
       >
         <span className={cls('absolute top-0.5 w-4 h-4 rounded-full transition-all shadow-sm', checked ? 'left-[18px] bg-on-accent' : 'left-0.5 bg-text')} />
       </button>
@@ -325,7 +325,7 @@ export function Table<T>({ columns, rows, rowKey, onRowClick, onRowContextMenu, 
     <div className={cls('overflow-auto', className)}>
       <table className="w-full text-[13px] border-collapse">
         <thead className={cls(stickyHeader && 'sticky top-0 z-10')}>
-          <tr className="bg-panel text-muted text-xs text-left">
+          <tr className="bg-panel-2/60 backdrop-blur text-muted text-xs text-left">
             {columns.map((c) => (
               <th
                 key={c.key}

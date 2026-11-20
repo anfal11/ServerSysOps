@@ -3,7 +3,7 @@ import type { Ctx } from '../core'
 import { getSettings } from '../store/settings'
 
 /**
- * Application self-update via electron-updater (generic provider configured in electron-builder.yml).
+ * Application self-update via electron-updater (GitHub Releases provider configured in electron-builder.yml).
  * Fails quietly when no update server is configured.
  */
 export function register(ctx: Ctx): void {

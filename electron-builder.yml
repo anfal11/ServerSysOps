@@ -33,7 +33,10 @@ linux:
   category: Development
 # Self-update feed: upload release/latest.yml, the -setup.exe and its .blockmap to this folder on your
 # website, then set the URL here (the installed app checks it on start when "Check for updates" is on).
+# Releases (installer, portable exe, latest.yml) are published as GitHub Releases; the app's
+# auto-updater checks the same place, so a new tag + release = automatic update for users.
 publish:
-  provider: generic
-  url: https://downloads.example.com/servermate
+  provider: github
+  owner: anfal11
+  repo: ServerMate
 npmRebuild: false

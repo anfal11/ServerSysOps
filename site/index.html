@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ServerMate – manage Linux servers over SSH</title>
+  <meta name="description" content="ServerMate is a free Windows desktop app that manages Linux servers over plain SSH: overview, terminal, files, Docker, web server, databases, firewall, users, cron, security audit and two-factor auth. Nothing to install on the server." />
+  <meta property="og:title" content="ServerMate – manage Linux servers over SSH" />
+  <meta property="og:description" content="Free desktop app for managing Linux servers over SSH. Nothing to install on the server." />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <style>
+    :root {
+      --bg: #1c1f26; --bg2: #21252d; --panel: #262a33; --panel2: #2d323c; --border: #363c47; --border2: #444b58;
+      --text: #e9ebf0; --muted: #a9b0be; --dim: #7c8494; --accent: #4f8ef7; --accent2: #3b7ae8; --ok: #22c55e; --warn: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 'Segoe UI', Inter, system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+    header { border-bottom: 1px solid var(--border); background: var(--bg2); position: sticky; top: 0; z-index: 10; }
+    header .wrap { display: flex; align-items: center; height: 56px; gap: 24px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; color: var(--text); }
+    .brand svg { width: 26px; height: 26px; }
+    nav { margin-left: auto; display: flex; gap: 20px; font-size: 14px; }
+    nav a { color: var(--muted); }
+    nav a:hover { color: var(--text); text-decoration: none; }
+    .hero { padding: 72px 0 40px; text-align: center; }
+    .hero h1 { font-size: 44px; line-height: 1.15; margin: 0 0 16px; letter-spacing: -0.02em; }
+    .hero p { font-size: 18px; color: var(--muted); max-width: 680px; margin: 0 auto 32px; }
+    .cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; align-items: center; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; height: 46px; padding: 0 22px; border-radius: 10px; font-weight: 600; font-size: 15px; border: 1px solid var(--border2); background: var(--panel2); color: var(--text); transition: background .15s, transform .05s; }
+    .btn:hover { background: var(--border2); text-decoration: none; }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: var(--accent); border-color: transparent; color: #fff; box-shadow: 0 6px 20px rgba(79,142,247,.3); }
+    .btn.primary:hover { background: var(--accent2); }
+    .btn svg { width: 18px; height: 18px; }
+    .meta { color: var(--dim); font-size: 13px; margin-top: 14px; }
+    .meta code { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; font-size: 12px; }
+    .shot { margin: 40px auto 0; max-width: 980px; border: 1px solid var(--border2); border-radius: 14px; background: var(--panel); box-shadow: 0 30px 80px rgba(0,0,0,.45); overflow: hidden; }
+    .shot .bar { height: 36px; background: var(--bg2); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 14px; gap: 8px; }
+    .shot .bar span { width: 11px; height: 11px; border-radius: 50%; background: var(--border2); }
+    .shot .body { display: grid; grid-template-columns: 180px 1fr; min-height: 300px; }
+    .shot aside { background: var(--bg2); border-right: 1px solid var(--border); padding: 14px 0; font-size: 13px; }
+    .shot aside div { padding: 6px 18px; color: var(--muted); }
+    .shot aside div.on { background: rgba(79,142,247,.12); color: var(--text); border-left: 2px solid var(--accent); }
+    .shot main { padding: 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; align-content: start; }
+    .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .stat small { color: var(--muted); font-size: 12px; display: block; }
+    .stat b { font-size: 24px; font-weight: 600; }
+    .stat i { display: block; height: 4px; background: var(--border); border-radius: 4px; margin-top: 10px; overflow: hidden; }
+    .stat i::after { content: ''; display: block; height: 100%; width: var(--w); background: var(--c, var(--accent)); }
+    .rows { grid-column: 1 / -1; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+    .rows div { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .rows div:last-child { border-bottom: 0; }
+    .rows span { color: var(--muted); }
+    .rows em { font-style: normal; background: var(--panel2); border: 1px solid var(--border2); border-radius: 6px; padding: 3px 10px; font-size: 12px; }
+    .rows em.p { background: var(--accent); border-color: transparent; color: #fff; }
+    section { padding: 56px 0; border-top: 1px solid var(--border); }
+    h2 { font-size: 26px; margin: 0 0 8px; letter-spacing: -0.01em; }
+    .lead { color: var(--muted); margin: 0 0 28px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+    .card h3 { margin: 0 0 6px; font-size: 15px; }
+    .card p { margin: 0; color: var(--muted); font-size: 14px; }
+    .steps { counter-reset: s; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .steps .card::before { counter-increment: s; content: counter(s); display: inline-flex; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; align-items: center; justify-content: center; font-size: 13px; margin-bottom: 10px; }
+    .note { background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.35); border-radius: 10px; padding: 14px 16px; font-size: 14px; color: #f8c86a; }
+    footer { padding: 32px 0 48px; color: var(--dim); font-size: 13px; text-align: center; border-top: 1px solid var(--border); }
+    @media (max-width: 720px) { .hero h1 { font-size: 32px; } .shot .body { grid-template-columns: 1fr; } .shot aside { display: none; } .shot main { grid-template-columns: repeat(2, 1fr); } nav { display: none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <a class="brand" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#4f8ef7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg>
+        ServerMate
+      </a>
+      <nav>
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
+        <a href="https://github.com/anfal11/ServerMate" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="wrap hero">
+    <h1>Manage your Linux servers<br />from one Windows app</h1>
+    <p>Overview, terminal, files, Docker, web server, databases, firewall, users, cron, security audit and two-factor auth. Everything works over plain SSH – nothing to install on the server.</p>
+    <div class="cta">
+      <a class="btn primary" id="dl-setup" href="https://github.com/anfal11/ServerMate/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download for Windows
+      </a>
+      <a class="btn" id="dl-portable" href="https://github.com/anfal11/ServerMate/releases/latest">Portable .exe (no install)</a>
+    </div>
+    <div class="meta" id="meta">Free and open source · Windows 10/11 (64-bit) · <a href="https://github.com/anfal11/ServerMate/releases" target="_blank" rel="noopener">all releases</a></div>
+
+    <div class="shot" aria-hidden="true">
+      <div class="bar"><span></span><span></span><span></span></div>
+      <div class="body">
+        <aside>
+          <div class="on">Overview</div><div>Terminal</div><div>Files</div><div>Docker</div><div>Web server</div><div>Databases</div><div>Processes</div><div>Users</div><div>Firewall</div><div>Two-factor auth</div><div>Security audit</div>
+        </aside>
+        <main>
+          <div class="stat"><small>CPU</small><b>23.4%</b><i style="--w:23%"></i></div>
+          <div class="stat"><small>Memory</small><b>61.2%</b><i style="--w:61%"></i></div>
+          <div class="stat"><small>Swap</small><b>12.0%</b><i style="--w:12%"></i></div>
+          <div class="stat"><small>Uptime</small><b>41d 3h</b></div>
+          <div class="rows">
+            <div><span>Package updates</span><b>6 updates available (2 security)</b><em class="p">Install</em></div>
+            <div><span>SSH login</span><b>Root login keys only · passwords off</b><em>Change</em></div>
+            <div><span>Fail2ban</span><b>Active · 3 banned</b><em>Configure</em></div>
+            <div><span>Two-factor auth</span><b>Enforced: SSH key + code</b><em>Manage</em></div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>Everything a server needs, one click away</h2>
+      <p class="lead">Each feature runs the same commands an admin would type, with confirmations and automatic rollback for anything that could lock you out.</p>
+      <div class="grid">
+        <div class="card"><h3>Overview &amp; quick actions</h3><p>Live CPU, memory, swap, network and disks. Change SSH port, root login, updates, fail2ban, hostname, time zone, swap and disk cleanup.</p></div>
+        <div class="card"><h3>Terminal</h3><p>Multiple shells per server, search, reliable paste, a shortcut-key bar and a compose box for long commands.</p></div>
+        <div class="card"><h3>Files (SFTP)</h3><p>Browse, edit, upload, download, permissions, archives and a root-mode for system files.</p></div>
+        <div class="card"><h3>Docker</h3><p>Containers, images, volumes, networks, logs, stats and Compose projects.</p></div>
+        <div class="card"><h3>Web server</h3><p>Nginx / Apache sites, PHP, reverse proxies and free HTTPS certificates with Let's Encrypt.</p></div>
+        <div class="card"><h3>Databases</h3><p>MySQL / MariaDB, PostgreSQL, MongoDB, SQL Server and SQLite: install, users, backups, restore and a query editor.</p></div>
+        <div class="card"><h3>Security audit</h3><p>Scored checks for SSH, firewall, updates, accounts, permissions, kernel hardening, with one-click fixes.</p></div>
+        <div class="card"><h3>Two-factor auth</h3><p>Google Authenticator for SSH logins with QR enrolment, scratch codes and lock-out-safe enforcement.</p></div>
+        <div class="card"><h3>Firewall, users, cron, processes</h3><p>ufw / firewalld rules, user and key management, cron jobs with timers, process control.</p></div>
+        <div class="card"><h3>Logs, snippets, tunnels, alerts</h3><p>journalctl and log files, saved command snippets, SSH tunnels and resource alerts.</p></div>
+        <div class="card"><h3>26 colour themes</h3><p>Soft dark, deep dark and light palettes including Tokyo Night, Nord, Dracula, Catppuccin and GitHub Light.</p></div>
+        <div class="card"><h3>Runs on every distro</h3><p>Ubuntu, Debian, RHEL, Rocky, Alma, Fedora, openSUSE, Alpine and Arch, using apt, dnf, zypper, apk or pacman.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>Install in a minute</h2>
+      <p class="lead">No account, no agent on the server. You only need SSH access.</p>
+      <div class="steps">
+        <div class="card"><h3>Download</h3><p>Get the installer (recommended, with automatic updates) or the portable .exe that runs from any folder.</p></div>
+        <div class="card"><h3>Add a server</h3><p>Host, user and a password or SSH key. Optional sudo password, jump host and 2FA secret.</p></div>
+        <div class="card"><h3>Connect</h3><p>Open the Overview and manage the server. Risky changes are tested and rolled back automatically.</p></div>
+      </div>
+      <div class="note" style="margin-top:18px">
+        <b>Windows SmartScreen:</b> the app is not yet code-signed, so Windows may show "Windows protected your PC" on first run. Click <b>More info → Run anyway</b>. The source is public on GitHub, and you can verify the SHA-256 of the file on the release page.
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">ServerMate is MIT licensed · <a href="https://github.com/anfal11/ServerMate" target="_blank" rel="noopener">Source code</a> · <a href="https://github.com/anfal11/ServerMate/issues" target="_blank" rel="noopener">Report a bug</a></div>
+  </footer>
+
+  <script>
+    // Point the buttons at the newest release assets (falls back to the releases page).
+    fetch('https://api.github.com/repos/anfal11/ServerMate/releases/latest')
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((rel) => {
+        const assets = rel.assets || []
+        const find = (re) => assets.find((a) => re.test(a.name))
+        const setup = find(/setup\.exe$/i)
+        const portable = find(/portable\.exe$/i)
+        const mb = (a) => (a.size / 1048576).toFixed(0) + ' MB'
+        if (setup) {
+          document.getElementById('dl-setup').href = setup.browser_download_url
+          document.getElementById('dl-setup').lastChild.textContent = ' Download for Windows · ' + rel.tag_name.replace(/^v/, '') + ' · ' + mb(setup)
+        }
+        if (portable) {
+          const p = document.getElementById('dl-portable')
+          p.href = portable.browser_download_url
+          p.textContent = 'Portable .exe (no install) · ' + mb(portable)
+        }
+        document.getElementById('meta').insertAdjacentHTML('afterbegin', 'Version <code>' + rel.tag_name.replace(/^v/, '') + '</code> · released ' + new Date(rel.published_at).toLocaleDateString() + ' · ')
+      })
+      .catch(() => {})
+  </script>
+</body>
+</html>

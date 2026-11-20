@@ -39,7 +39,9 @@ Two ready-to-run files are produced in `release/` by `npm run dist`:
 | `ServerMate_<version>_x64-setup.exe` | Installer (per-user, no admin rights needed, desktop + Start menu shortcut, uninstaller). Put this on your website for one-click download → install. |
 | `ServerMate_<version>_x64-portable.exe` | Single-file portable build: runs from a USB stick or any folder without installing. Settings live in `%APPDATA%\ServerMate`. |
 
-Hosting it yourself: upload the setup `.exe` (and, for self-updates, `latest.yml` plus the `.exe.blockmap`) to a folder on your site, then set that folder's URL under `publish.url` in `electron-builder.yml` before building. Installed copies check that URL on start and offer the update in Settings.
+Official downloads live on [GitHub Releases](https://github.com/anfal11/ServerMate/releases); the landing page in `site/` (deployed on Vercel) links to the latest release automatically. Installed copies check GitHub Releases on start and offer updates in Settings.
+
+Publishing a new version: bump `version` in `package.json`, commit, tag `vX.Y.Z`, run `npm run dist`, then create a GitHub release for that tag and attach `ServerMate_X.Y.Z_x64-setup.exe`, `ServerMate_X.Y.Z_x64-setup.exe.blockmap`, `ServerMate_X.Y.Z_x64-portable.exe` and `latest.yml` from `release/`. The `latest.yml` file is what existing installs use to detect the update.
 
 The build is not code-signed, so Windows SmartScreen shows "Windows protected your PC" the first time: click **More info → Run anyway**. To remove that warning, sign the exe with an Authenticode certificate (set `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD` for electron-builder). macOS and Linux packages need to be built on those platforms (`npm run dist:mac`, `npm run dist:linux`).
 

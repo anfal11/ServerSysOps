@@ -39,9 +39,9 @@ Two ready-to-run files are produced in `release/` by `npm run dist`:
 | `CentralServer_<version>_x64-setup.exe` | Installer (per-user, no admin rights needed, desktop + Start menu shortcut, uninstaller). Put this on your website for one-click download → install. |
 | `CentralServer_<version>_x64-portable.exe` | Single-file portable build: runs from a USB stick or any folder without installing. Settings live in `%APPDATA%\Central Server`. |
 
-Official downloads live on [GitHub Releases](https://github.com/anfal11/CentralServer/releases); the landing page in `site/` (deployed on Vercel) links to the latest release automatically. Installed copies check GitHub Releases on start and offer updates in Settings.
+Official downloads live on [GitHub Releases](https://github.com/anfal11/CentralServer-releases/releases); the landing page in `site/` (deployed on Vercel) links to the latest release automatically. Installed copies check GitHub Releases on start and offer updates in Settings.
 
-Publishing a new version: bump `version` in `package.json`, commit, tag `vX.Y.Z`, run `npm run dist`, then create a GitHub release for that tag and attach `CentralServer_X.Y.Z_x64-setup.exe`, `CentralServer_X.Y.Z_x64-setup.exe.blockmap`, `CentralServer_X.Y.Z_x64-portable.exe` and `latest.yml` from `release/`. The `latest.yml` file is what existing installs use to detect the update.
+Publishing a new version: bump `version` in `package.json`, commit, tag `vX.Y.Z`, run `npm run dist`, then create a release named `vX.Y.Z` in the public `CentralServer-releases` repository (the code repository is private and is never exposed) and attach `CentralServer_X.Y.Z_x64-setup.exe`, `CentralServer_X.Y.Z_x64-setup.exe.blockmap`, `CentralServer_X.Y.Z_x64-portable.exe` and `latest.yml` from `release/`. The `latest.yml` file is what existing installs use to detect the update.
 
 The build is not code-signed, so Windows SmartScreen shows "Windows protected your PC" the first time: click **More info → Run anyway**. To remove that warning, sign the exe with an Authenticode certificate (set `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD` for electron-builder). macOS and Linux packages need to be built on those platforms (`npm run dist:mac`, `npm run dist:linux`).
 

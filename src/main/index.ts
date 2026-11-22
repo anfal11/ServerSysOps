@@ -26,7 +26,8 @@ import * as pkgupdates from './services/pkgupdates'
 import * as updater from './services/updater'
 import * as backup from './services/backup'
 import * as traffic from './services/traffic'
-import { APP_ID, APP_NAME, appIcon, migrateLegacyUserData, repairShortcuts } from './branding'
+import { APP_ID, APP_NAME, appIcon, repairShortcuts } from './branding'
+import { migrateLegacyData } from './store/legacyData'
 
 const isDev = !app.isPackaged
 let mainWindow: BrowserWindow | null = null
@@ -68,9 +69,13 @@ function createWindow(): void {
   else mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
+// Before `ready`: data of earlier product names (and, on Windows, the key file that protects the stored
+// passwords) must be in place before Electron reads the safeStorage key.
+const legacyMigration = migrateLegacyData(app.getPath('userData'))
+
 app.whenReady().then(() => {
   app.setAppUserModelId(APP_ID)
-  migrateLegacyUserData()
+  if (legacyMigration.action !== 'none') console.log('[legacy data]', legacyMigration.action, legacyMigration.detail ?? '')
   repairShortcuts()
   nativeTheme.themeSource = 'dark'
   Menu.setApplicationMenu(null)

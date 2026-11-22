@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2 - 2026-11-22
+
+### Fixed
+- **"Authentication failed" for every saved server after updating from Central Server.** Saved passwords are encrypted with a key that Windows keeps per data folder; the rename migration copied the servers but not that key, so the passwords could no longer be decrypted. The app now carries the key over as well, and repairs installs that were already migrated: on start it adopts the old key when all stored secrets still come from the old folder, so no password has to be typed again. If you re-entered some passwords meanwhile, those are kept and only the remaining ones need to be saved again.
+
 ## 0.4.1 - 2026-11-22
 
 ### Fixed

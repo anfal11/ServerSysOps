@@ -1,7 +1,7 @@
 {
   "name": "serversysops",
   "productName": "ServerSysOps",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Desktop app to manage and control Linux servers over SSH: overview, terminal, files, Docker, web servers, databases, runtimes, cron, processes, users, firewall, security audit and more.",
   "main": "./out/main/index.js",
   "author": "ServerSysOps",

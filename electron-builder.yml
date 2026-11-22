@@ -36,11 +36,10 @@ linux:
   category: Development
 # Self-update feed: upload release/latest.yml, the -setup.exe and its .blockmap to this folder on your
 # website, then set the URL here (the installed app checks it on start when "Check for updates" is on).
-# Installer, portable exe and latest.yml are published as GitHub Releases of a separate PUBLIC
-# repository that holds no source code (the code repo stays private). The app's auto-updater and
-# the website read from there.
+# Installer, portable exe and latest.yml are published as GitHub Releases of this repository;
+# the app's auto-updater and the website read from there.
 publish:
   provider: github
   owner: anfal11
-  repo: CentralServer-releases
+  repo: CentralServer
 npmRebuild: false

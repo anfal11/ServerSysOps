@@ -7,8 +7,8 @@ import { b64Echo, shq } from '../ssh/shell'
 /* Constants / validation                                              */
 /* ------------------------------------------------------------------ */
 
-const SSHD_USERS_DROPIN = '/etc/ssh/sshd_config.d/00-centralserver-users.conf'
-const BACKUP_DIR = '/var/backups/centralserver'
+const SSHD_USERS_DROPIN = '/etc/ssh/sshd_config.d/00-serversysops-users.conf'
+const BACKUP_DIR = '/var/backups/serversysops'
 const ADMIN_GROUPS = ['sudo', 'wheel', 'admin']
 const NEW_USER_RE = /^[a-z_][a-z0-9_-]{0,31}$/
 /** Existing accounts may have been created with looser rules (dots, capitals, trailing $ for Samba machine accounts). */
@@ -232,7 +232,7 @@ async function validateKeys(ssh: SshClient, keyText: string): Promise<{ raw: str
 
 /** sudo silently ignores files in /etc/sudoers.d whose name contains a '.' (or ends in '~'), so dots in user names are mapped to '_'. */
 function sudoersDropinPath(name: string): string {
-  return `/etc/sudoers.d/centralserver-${name.replace(/[^A-Za-z0-9_-]/g, '_')}`
+  return `/etc/sudoers.d/serversysops-${name.replace(/[^A-Za-z0-9_-]/g, '_')}`
 }
 
 async function writeSudoersDropin(ssh: SshClient, name: string, content: string): Promise<void> {
@@ -244,7 +244,7 @@ async function writeSudoersDropin(ssh: SshClient, name: string, content: string)
 }
 
 async function removeSudoersDropin(ssh: SshClient, name: string): Promise<void> {
-  await rootExec(ssh, `rm -f ${shq(sudoersDropinPath(name))} ${shq(`/etc/sudoers.d/centralserver-${name}`)}`)
+  await rootExec(ssh, `rm -f ${shq(sudoersDropinPath(name))} ${shq(`/etc/sudoers.d/serversysops-${name}`)}`)
 }
 
 async function hasSudoRights(ssh: SshClient, name: string): Promise<boolean> {
@@ -256,8 +256,8 @@ async function hasSudoRights(ssh: SshClient, name: string): Promise<boolean> {
 /* Key-only (sshd Match block)                                          */
 /* ------------------------------------------------------------------ */
 
-const KEYONLY_BEGIN = '# BEGIN Central Server key-only logins'
-const KEYONLY_END = '# END Central Server key-only logins'
+const KEYONLY_BEGIN = '# BEGIN ServerSysOps key-only logins'
+const KEYONLY_END = '# END ServerSysOps key-only logins'
 
 function keyOnlyBlock(users: string[]): string {
   if (!users.length) return ''
@@ -280,7 +280,7 @@ async function writeKeyOnlyUsers(ssh: SshClient, users: string[]): Promise<void>
   if (includes) {
     const prev = await rootExec(ssh, `cat ${SSHD_USERS_DROPIN} 2>/dev/null`)
     const hadFile = prev.code === 0
-    if (block) await writeRootFile(ssh, SSHD_USERS_DROPIN, `# Managed by Central Server - users with password login disabled\n${block}`)
+    if (block) await writeRootFile(ssh, SSHD_USERS_DROPIN, `# Managed by ServerSysOps - users with password login disabled\n${block}`)
     else await rootExec(ssh, `rm -f ${SSHD_USERS_DROPIN}`)
     const err = await sshdTest(ssh)
     if (err) {
@@ -293,11 +293,11 @@ async function writeKeyOnlyUsers(ssh: SshClient, users: string[]): Promise<void>
     const section = block ? `${KEYONLY_BEGIN}\n${block}${KEYONLY_END}\n` : ''
     await rootRun(
       ssh,
-      `set -e; cp -p /etc/ssh/sshd_config /etc/ssh/sshd_config.centralserver.bak; t=$(mktemp); sed '/^${KEYONLY_BEGIN}$/,/^${KEYONLY_END}$/d' /etc/ssh/sshd_config > "$t"; ${b64Echo(section)} >> "$t"; install -m 644 -o root -g root "$t" /etc/ssh/sshd_config; rm -f "$t"`
+      `set -e; cp -p /etc/ssh/sshd_config /etc/ssh/sshd_config.serversysops.bak; t=$(mktemp); sed '/^${KEYONLY_BEGIN}$/,/^${KEYONLY_END}$/d' /etc/ssh/sshd_config > "$t"; ${b64Echo(section)} >> "$t"; install -m 644 -o root -g root "$t" /etc/ssh/sshd_config; rm -f "$t"`
     )
     const err = await sshdTest(ssh)
     if (err) {
-      await rootExec(ssh, 'cp -p /etc/ssh/sshd_config.centralserver.bak /etc/ssh/sshd_config')
+      await rootExec(ssh, 'cp -p /etc/ssh/sshd_config.serversysops.bak /etc/ssh/sshd_config')
       throw new Error('sshd rejected the configuration; change reverted: ' + err)
     }
   }
@@ -431,10 +431,10 @@ echo __END`
     if (input.sudo || input.passwordlessSudo) {
       const grp = await adminGroup(ssh)
       await rootRun(ssh, `usermod -aG ${shq(grp)} ${shq(name)} 2>/dev/null || addgroup ${shq(name)} ${shq(grp)}`)
-      if (input.passwordlessSudo) await writeSudoersDropin(ssh, name, `# Managed by Central Server\n${name} ALL=(ALL:ALL) NOPASSWD:ALL\n`)
+      if (input.passwordlessSudo) await writeSudoersDropin(ssh, name, `# Managed by ServerSysOps\n${name} ALL=(ALL:ALL) NOPASSWD:ALL\n`)
       else if (!(await hasSudoRights(ssh, name))) {
         // Group exists but is not enabled in sudoers (common on Arch/Alpine): grant explicitly.
-        await writeSudoersDropin(ssh, name, `# Managed by Central Server\n${name} ALL=(ALL:ALL) ALL\n`)
+        await writeSudoersDropin(ssh, name, `# Managed by ServerSysOps\n${name} ALL=(ALL:ALL) ALL\n`)
         notes.push(`the ${grp} group had no sudo rights, so an explicit sudoers entry was created`)
       }
     }
@@ -451,7 +451,7 @@ echo __END`
     const ssh = ctx.ssh(serverId)
     const name = assertUser(nameRaw)
     if (name === 'root') throw new Error('Refusing to delete root')
-    if (name === selfUser(ssh)) throw new Error('Refusing to delete the account Central Server is logged in with')
+    if (name === selfUser(ssh)) throw new Error('Refusing to delete the account ServerSysOps is logged in with')
     const { home } = await homeAndGroup(ssh, name).catch(() => ({ home: '', group: '' }))
     if (opts?.removeHome && (!home || home === '/' || /^\/(bin|sbin|usr|etc|var|proc|sys|dev|run|opt|srv)(\/|$)/.test(home))) {
       throw new Error(`Refusing to remove ${home || 'an unknown home directory'}; delete the account without removing its home`)
@@ -463,7 +463,7 @@ echo __END`
     }
     await rootRun(
       ssh,
-      `pkill -KILL -u ${shq(name)} 2>/dev/null; sleep 0.3; rm -f ${shq(sudoersDropinPath(name))} ${shq(`/etc/sudoers.d/centralserver-${name}`)}; if command -v userdel >/dev/null 2>&1; then userdel ${opts?.removeHome ? '-r' : ''} ${shq(name)} 2>&1 | grep -v 'mail spool' || true; else deluser ${opts?.removeHome ? '--remove-home' : ''} ${shq(name)}; fi; getent passwd ${shq(name)} >/dev/null && { echo "userdel failed" >&2; exit 1; } || true`,
+      `pkill -KILL -u ${shq(name)} 2>/dev/null; sleep 0.3; rm -f ${shq(sudoersDropinPath(name))} ${shq(`/etc/sudoers.d/serversysops-${name}`)}; if command -v userdel >/dev/null 2>&1; then userdel ${opts?.removeHome ? '-r' : ''} ${shq(name)} 2>&1 | grep -v 'mail spool' || true; else deluser ${opts?.removeHome ? '--remove-home' : ''} ${shq(name)}; fi; getent passwd ${shq(name)} >/dev/null && { echo "userdel failed" >&2; exit 1; } || true`,
       { timeoutMs: 600000 }
     )
     const keyOnlyUsers = await readKeyOnlyUsers(ssh)
@@ -477,15 +477,15 @@ echo __END`
     const ssh = ctx.ssh(serverId)
     const name = assertUser(nameRaw)
     if (name === 'root') throw new Error('root is always an administrator')
-    if (!admin && name === selfUser(ssh)) throw new Error('Refusing to revoke admin rights from the account Central Server is logged in with')
+    if (!admin && name === selfUser(ssh)) throw new Error('Refusing to revoke admin rights from the account ServerSysOps is logged in with')
     const grp = await adminGroup(ssh)
     if (admin) {
       await rootRun(ssh, `usermod -aG ${shq(grp)} ${shq(name)} 2>/dev/null || addgroup ${shq(name)} ${shq(grp)}`)
-      if (!(await hasSudoRights(ssh, name))) await writeSudoersDropin(ssh, name, `# Managed by Central Server\n${name} ALL=(ALL:ALL) ALL\n`)
+      if (!(await hasSudoRights(ssh, name))) await writeSudoersDropin(ssh, name, `# Managed by ServerSysOps\n${name} ALL=(ALL:ALL) ALL\n`)
     } else {
       await rootRun(ssh, `for g in ${ADMIN_GROUPS.join(' ')}; do if id -nG ${shq(name)} 2>/dev/null | tr ' ' '\\n' | grep -qx "$g"; then gpasswd -d ${shq(name)} "$g" >/dev/null 2>&1 || deluser ${shq(name)} "$g" >/dev/null 2>&1 || true; fi; done`)
       await removeSudoersDropin(ssh, name)
-      if (await hasSudoRights(ssh, name)) throw new Error(`${name} still has sudo rights through another sudoers entry (check /etc/sudoers and /etc/sudoers.d). Group membership and the Central Server entry were removed.`)
+      if (await hasSudoRights(ssh, name)) throw new Error(`${name} still has sudo rights through another sudoers entry (check /etc/sudoers and /etc/sudoers.d). Group membership and the ServerSysOps entry were removed.`)
     }
     ctx.audit(serverId, 'users.admin', `${name} ${admin ? 'granted' : 'revoked'}`)
   })
@@ -494,7 +494,7 @@ echo __END`
   ctx.handle('users:lock', async (serverId: string, nameRaw: string, opts?: LockOptions) => {
     const ssh = ctx.ssh(serverId)
     const name = assertUser(nameRaw)
-    if (name === selfUser(ssh)) throw new Error('Refusing to lock the account Central Server is logged in with')
+    if (name === selfUser(ssh)) throw new Error('Refusing to lock the account ServerSysOps is logged in with')
     // Lock the password AND expire the account so key logins are blocked too.
     await rootRun(ssh, `usermod -L -e 1970-01-02 ${shq(name)} 2>/dev/null || { passwd -l ${shq(name)} && chage -E 1 ${shq(name)} 2>/dev/null; } || passwd -l ${shq(name)}`)
     if (opts?.terminateSessions) await rootExec(ssh, `pkill -KILL -u ${shq(name)} 2>/dev/null || true`)
@@ -526,7 +526,7 @@ echo __END`
     const shell = assertShell(shellRaw)
     const ok = await ssh.exec(`[ -x ${shq(shell)} ] && echo yes`)
     if (!ok.stdout.includes('yes')) throw new Error(`${shell} does not exist or is not executable on this server`)
-    if (name === selfUser(ssh) && /(nologin|false)$/.test(shell)) throw new Error('Refusing to give the account Central Server is logged in with a non-interactive shell')
+    if (name === selfUser(ssh) && /(nologin|false)$/.test(shell)) throw new Error('Refusing to give the account ServerSysOps is logged in with a non-interactive shell')
     await rootRun(ssh, `usermod -s ${shq(shell)} ${shq(name)} 2>/dev/null || chsh -s ${shq(shell)} ${shq(name)}`)
     ctx.audit(serverId, 'users.shell', `${name} -> ${shell}`)
   })
@@ -585,7 +585,7 @@ echo __END`
     if (idx < 0) throw new Error('Key not found (the file may have changed, reload and try again)')
     if (name === selfUser(ssh) && ssh.profile.auth !== 'password') {
       const remaining = lines.filter((l, i) => i !== idx && parseKeyLine(l)).length
-      if (remaining === 0) throw new Error('Refusing to remove the last key of the account Central Server uses to log in with a key')
+      if (remaining === 0) throw new Error('Refusing to remove the last key of the account ServerSysOps uses to log in with a key')
     }
     const removed = lines[idx]
     await writeAuthorizedKeys(ssh, name, home, group, lines.filter((_, i) => i !== idx))
@@ -597,7 +597,7 @@ echo __END`
     const ssh = ctx.ssh(serverId)
     const name = assertUser(nameRaw)
     const self = selfUser(ssh)
-    if (keyOnly && name === self && ssh.profile.auth === 'password') throw new Error('This profile logs in with a password. Switch the profile to key authentication first, otherwise Central Server would lock itself out.')
+    if (keyOnly && name === self && ssh.profile.auth === 'password') throw new Error('This profile logs in with a password. Switch the profile to key authentication first, otherwise ServerSysOps would lock itself out.')
     if (keyOnly) {
       const { lines } = await readAuthorizedKeys(ssh, name)
       if (!lines.some((l) => parseKeyLine(l))) throw new Error(`${name} has no SSH keys. Add a key first, otherwise the account could not log in at all.`)
@@ -605,7 +605,7 @@ echo __END`
     const current = await readKeyOnlyUsers(ssh)
     const next = keyOnly ? [...new Set([...current, name])] : current.filter((u) => u !== name)
     await writeKeyOnlyUsers(ssh, next)
-    // Locking the Unix password of the login account would also break Central Server's own sudo (which
+    // Locking the Unix password of the login account would also break ServerSysOps's own sudo (which
     // authenticates with that password). The sshd Match block already denies password SSH logins.
     const breaksSudo = name === self && !ssh.os?.isRoot && !ssh.os?.sudoPasswordless
     if (keyOnly && !breaksSudo) await rootExec(ssh, `passwd -l ${shq(name)} 2>/dev/null || usermod -L ${shq(name)}`)
@@ -706,7 +706,7 @@ echo __END`
     const supplementary = groups.filter((g) => g !== primaryGroup?.trim())
     if (name === selfUser(ssh)) {
       const losesAdmin = curGroups.some((g) => ADMIN_GROUPS.includes(g)) && !supplementary.some((g) => ADMIN_GROUPS.includes(g))
-      if (losesAdmin) throw new Error('Refusing to remove the account Central Server is logged in with from its admin group')
+      if (losesAdmin) throw new Error('Refusing to remove the account ServerSysOps is logged in with from its admin group')
     }
     await rootRun(ssh, `usermod -G ${shq(supplementary.join(','))} ${shq(name)}`)
     ctx.audit(serverId, 'users.groups', `${name}: ${supplementary.join(',') || '(none)'}`)

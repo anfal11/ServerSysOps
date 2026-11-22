@@ -51,7 +51,7 @@ function createWindow(): void {
     }
   })
   mainWindow.on('ready-to-show', () => mainWindow?.show())
-  if (process.env.CENTRALSERVER_DEBUG) {
+  if (process.env.SERVERSYSOPS_DEBUG) {
     mainWindow.webContents.on('console-message', (ev) => {
       const { level, message, lineNumber, sourceId } = ev as unknown as { level: string | number; message: string; lineNumber: number; sourceId: string }
       console.log(`[renderer:${level}] ${message} (${sourceId}:${lineNumber})`)

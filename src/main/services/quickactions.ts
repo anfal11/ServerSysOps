@@ -6,10 +6,10 @@ import { installCmd, isInstalled, listUpgradable, refreshCmd, runPkg, upgradeAll
 import { getServer } from '../store/servers'
 import { probeLogin } from '../ssh/probe'
 
-const SSHD_DROPIN = '/etc/ssh/sshd_config.d/00-centralserver.conf'
-const SSHD_PORT_DROPIN = '/etc/ssh/sshd_config.d/00-centralserver-port.conf'
+const SSHD_DROPIN = '/etc/ssh/sshd_config.d/00-serversysops.conf'
+const SSHD_PORT_DROPIN = '/etc/ssh/sshd_config.d/00-serversysops-port.conf'
 const SOCKET_DROPIN_DIR = '/etc/systemd/system/ssh.socket.d'
-const SOCKET_DROPIN = `${SOCKET_DROPIN_DIR}/centralserver-port.conf`
+const SOCKET_DROPIN = `${SOCKET_DROPIN_DIR}/serversysops-port.conf`
 
 /** Write a root-owned file from content (base64 transport). */
 async function writeRootFile(ssh: SshClient, path: string, content: string, mode = '644'): Promise<void> {
@@ -44,7 +44,7 @@ async function firewallBackend(ssh: SshClient): Promise<QuickActionsState['firew
 
 async function openFirewallPort(ssh: SshClient, port: number): Promise<void> {
   const fw = await firewallBackend(ssh)
-  if (fw === 'ufw') await ssh.sudo(`ufw allow ${port}/tcp comment 'SSH (Central Server)'`)
+  if (fw === 'ufw') await ssh.sudo(`ufw allow ${port}/tcp comment 'SSH (ServerSysOps)'`)
   if (fw === 'firewalld') await ssh.sudo(`firewall-cmd --permanent --add-port=${port}/tcp && firewall-cmd --reload`)
 }
 
@@ -65,7 +65,7 @@ echo __SSHDCFG; ${SSHD_CONFIG_DUMP}
 echo __LISTEN; (ss -tlnH 2>/dev/null || netstat -tln 2>/dev/null) | awk '{print $4}' | sed 's/.*://' | sort -un | tr '\\n' ' '
 echo __SOCKET; systemctl is-active ssh.socket 2>/dev/null
 echo __UU; if [ -f /etc/apt/apt.conf.d/20auto-upgrades ]; then grep -E 'Unattended-Upgrade' /etc/apt/apt.conf.d/20auto-upgrades | grep -oE '"[0-9]+"' | tr -d '"'; elif systemctl is-enabled dnf-automatic.timer >/dev/null 2>&1; then echo 1; elif command -v apt-get >/dev/null 2>&1 || command -v dnf >/dev/null 2>&1; then echo 0; else echo NA; fi
-echo __F2B; if command -v fail2ban-client >/dev/null 2>&1; then echo installed; systemctl is-active fail2ban 2>/dev/null; sudo -n fail2ban-client status sshd 2>/dev/null | grep -E 'Currently banned' | awk '{print $NF}'; grep -hE '^(maxretry|findtime|bantime|ignoreip)\\s*=' /etc/fail2ban/jail.d/centralserver.local /etc/fail2ban/jail.local 2>/dev/null; else echo missing; fi
+echo __F2B; if command -v fail2ban-client >/dev/null 2>&1; then echo installed; systemctl is-active fail2ban 2>/dev/null; sudo -n fail2ban-client status sshd 2>/dev/null | grep -E 'Currently banned' | awk '{print $NF}'; grep -hE '^(maxretry|findtime|bantime|ignoreip)\\s*=' /etc/fail2ban/jail.d/serversysops.local /etc/fail2ban/jail.local 2>/dev/null; else echo missing; fi
 echo __HOST; hostname
 echo __TZ; timedatectl show -p Timezone -p NTP -p NTPSynchronized --value 2>/dev/null || cat /etc/timezone 2>/dev/null
 echo __SWAP; cat /proc/swaps | tail -n +2; echo "SWAPPINESS=$(cat /proc/sys/vm/swappiness)"
@@ -174,10 +174,10 @@ echo __END`
       await openFirewallPort(ssh, newPort)
 
       h.log('Step 2/4: configuring sshd to listen on both ports…')
-      const both = `# Managed by Central Server - staged SSH port change\nPort ${oldPort}\nPort ${newPort}\n`
+      const both = `# Managed by ServerSysOps - staged SSH port change\nPort ${oldPort}\nPort ${newPort}\n`
       if (includes) await writeRootFile(ssh, SSHD_PORT_DROPIN, both)
       else {
-        await ssh.sudoRun(`cp -p /etc/ssh/sshd_config /etc/ssh/sshd_config.centralserver-port.bak && t=$(mktemp) && sed -i -E '/^\\s*Port\\s/d' /etc/ssh/sshd_config && ${b64Echo(both)} | cat - /etc/ssh/sshd_config > "$t" && install -m 644 "$t" /etc/ssh/sshd_config; rc=$?; rm -f "$t"; exit $rc`)
+        await ssh.sudoRun(`cp -p /etc/ssh/sshd_config /etc/ssh/sshd_config.serversysops-port.bak && t=$(mktemp) && sed -i -E '/^\\s*Port\\s/d' /etc/ssh/sshd_config && ${b64Echo(both)} | cat - /etc/ssh/sshd_config > "$t" && install -m 644 "$t" /etc/ssh/sshd_config; rc=$?; rm -f "$t"; exit $rc`)
       }
       if (socket) {
         await writeRootFile(ssh, SOCKET_DROPIN, `[Socket]\nListenStream=\nListenStream=${oldPort}\nListenStream=${newPort}\n`)
@@ -191,14 +191,14 @@ echo __END`
       if (!ok) {
         h.log('Login on the new port FAILED. Rolling back…')
         if (includes) await ssh.sudo(`rm -f ${SSHD_PORT_DROPIN}`)
-        else await ssh.sudo(`cp /etc/ssh/sshd_config.centralserver-port.bak /etc/ssh/sshd_config`)
+        else await ssh.sudo(`cp /etc/ssh/sshd_config.serversysops-port.bak /etc/ssh/sshd_config`)
         if (socket) await ssh.sudo(`rm -f ${SOCKET_DROPIN}; systemctl daemon-reload; systemctl restart ssh.socket`)
         await sshdReload(ssh).catch(() => {})
         throw new Error(`Could not log in on port ${newPort}; previous configuration restored. Check cloud firewalls / security groups.`)
       }
 
       h.log(`Step 4/4: removing old port ${oldPort}…`)
-      const only = `# Managed by Central Server\nPort ${newPort}\n`
+      const only = `# Managed by ServerSysOps\nPort ${newPort}\n`
       if (includes) await writeRootFile(ssh, SSHD_PORT_DROPIN, only)
       else await ssh.sudoRun(`t=$(mktemp) && sed -i -E '/^\\s*Port\\s/d' /etc/ssh/sshd_config && ${b64Echo(only)} | cat - /etc/ssh/sshd_config > "$t" && install -m 644 "$t" /etc/ssh/sshd_config; rc=$?; rm -f "$t"; exit $rc`)
       if (socket) {
@@ -220,7 +220,7 @@ echo __END`
   ctx.handle('qa:setSshLogin', async (serverId: string, opts: { permitRootLogin: string; passwordAuth: boolean }) => {
     const ssh = ctx.ssh(serverId)
     const prl = ['yes', 'no', 'prohibit-password', 'forced-commands-only'].includes(opts.permitRootLogin) ? opts.permitRootLogin : 'prohibit-password'
-    const content = `# Managed by Central Server - keep at top so these values win\nPermitRootLogin ${prl}\nPasswordAuthentication ${opts.passwordAuth ? 'yes' : 'no'}\nKbdInteractiveAuthentication ${opts.passwordAuth ? 'yes' : 'no'}\nPubkeyAuthentication yes\n`
+    const content = `# Managed by ServerSysOps - keep at top so these values win\nPermitRootLogin ${prl}\nPasswordAuthentication ${opts.passwordAuth ? 'yes' : 'no'}\nKbdInteractiveAuthentication ${opts.passwordAuth ? 'yes' : 'no'}\nPubkeyAuthentication yes\n`
     const { id } = ctx.tasks.start('Update SSH login rules', serverId, async (h) => {
       const includes = await sshdSupportsInclude(ssh)
       h.log('Backing up current configuration…')
@@ -228,7 +228,7 @@ echo __END`
       const hadDropin = backup.code === 0
       if (includes) await writeRootFile(ssh, SSHD_DROPIN, content)
       else {
-        await ssh.sudoRun(`cp -p /etc/ssh/sshd_config /etc/ssh/sshd_config.centralserver-login.bak && t=$(mktemp) && sed -i -E '/^\\s*(PermitRootLogin|PasswordAuthentication|KbdInteractiveAuthentication|ChallengeResponseAuthentication)\\s/d' /etc/ssh/sshd_config && ${b64Echo(content)} | cat - /etc/ssh/sshd_config > "$t" && install -m 644 "$t" /etc/ssh/sshd_config; rc=$?; rm -f "$t"; exit $rc`)
+        await ssh.sudoRun(`cp -p /etc/ssh/sshd_config /etc/ssh/sshd_config.serversysops-login.bak && t=$(mktemp) && sed -i -E '/^\\s*(PermitRootLogin|PasswordAuthentication|KbdInteractiveAuthentication|ChallengeResponseAuthentication)\\s/d' /etc/ssh/sshd_config && ${b64Echo(content)} | cat - /etc/ssh/sshd_config > "$t" && install -m 644 "$t" /etc/ssh/sshd_config; rc=$?; rm -f "$t"; exit $rc`)
       }
       h.log('Testing and reloading sshd…')
       await sshdReload(ssh)
@@ -240,7 +240,7 @@ echo __END`
         if (includes) {
           if (hadDropin) await writeRootFile(ssh, SSHD_DROPIN, backup.stdout)
           else await ssh.sudo(`rm -f ${SSHD_DROPIN}`)
-        } else await ssh.sudo('cp /etc/ssh/sshd_config.centralserver-login.bak /etc/ssh/sshd_config')
+        } else await ssh.sudo('cp /etc/ssh/sshd_config.serversysops-login.bak /etc/ssh/sshd_config')
         await sshdReload(ssh)
         throw new Error('The new login rules would lock this app out (probably password login turned off while this profile uses a password). Change reverted.')
       }
@@ -258,7 +258,7 @@ echo __END`
     const when = delayMin && delayMin > 0 ? `+${Math.floor(delayMin)}` : 'now'
     const flag = action === 'reboot' ? '-r' : '-h'
     // Run detached so the SSH session closing does not abort it.
-    const r = await ssh.sudo(`nohup shutdown ${flag} ${when} "Requested via Central Server" >/dev/null 2>&1 &`, { timeoutMs: 15000 }).catch(() => ({ code: 0, stdout: '', stderr: '' }))
+    const r = await ssh.sudo(`nohup shutdown ${flag} ${when} "Requested via ServerSysOps" >/dev/null 2>&1 &`, { timeoutMs: 15000 }).catch(() => ({ code: 0, stdout: '', stderr: '' }))
     return r.stdout
   })
 
@@ -332,14 +332,14 @@ echo __END`
       })
     const ports = (cfg.sshPorts ?? []).map(assertPort)
     const maxretry = Number.isInteger(cfg.maxretry) && cfg.maxretry >= 1 ? cfg.maxretry : 5
-    const jail = `# Managed by Central Server\n[DEFAULT]\nignoreip = 127.0.0.1/8 ::1 ${ignore.join(' ')}\nbantime = ${okTime(cfg.bantime)}\nfindtime = ${okTime(cfg.findtime)}\nmaxretry = ${maxretry}\nbanaction = %(banaction_allports)s\n\n[sshd]\nenabled = true\nport = ${ports.join(',') || 'ssh'}\nbackend = systemd\n`
+    const jail = `# Managed by ServerSysOps\n[DEFAULT]\nignoreip = 127.0.0.1/8 ::1 ${ignore.join(' ')}\nbantime = ${okTime(cfg.bantime)}\nfindtime = ${okTime(cfg.findtime)}\nmaxretry = ${maxretry}\nbanaction = %(banaction_allports)s\n\n[sshd]\nenabled = true\nport = ${ports.join(',') || 'ssh'}\nbackend = systemd\n`
     const { id } = ctx.tasks.start('Install & configure Fail2ban', serverId, async (h) => {
       if (!(await isInstalled(ssh, 'fail2ban'))) {
         h.log('Installing fail2ban…')
         await runPkg(ssh, installCmd(ssh, ['fail2ban']), { onStdout: (c) => h.append(c), onStderr: (c) => h.append(c) })
       }
-      h.log('Writing /etc/fail2ban/jail.d/centralserver.local…')
-      await writeRootFile(ssh, '/etc/fail2ban/jail.d/centralserver.local', jail)
+      h.log('Writing /etc/fail2ban/jail.d/serversysops.local…')
+      await writeRootFile(ssh, '/etc/fail2ban/jail.d/serversysops.local', jail)
       await ssh.sudoRun('systemctl enable --now fail2ban && systemctl restart fail2ban')
       await new Promise((r) => setTimeout(r, 1500))
       const st = await ssh.sudo('fail2ban-client status sshd 2>&1')
@@ -405,7 +405,7 @@ echo __END`
         }
       }
       h.log(`Setting vm.swappiness=${swappiness}…`)
-      await ssh.sudoRun(`sysctl -w vm.swappiness=${swappiness} >/dev/null && mkdir -p /etc/sysctl.d && echo "vm.swappiness=${swappiness}" > /etc/sysctl.d/99-centralserver-swappiness.conf`)
+      await ssh.sudoRun(`sysctl -w vm.swappiness=${swappiness} >/dev/null && mkdir -p /etc/sysctl.d && echo "vm.swappiness=${swappiness}" > /etc/sysctl.d/99-serversysops-swappiness.conf`)
       h.log('Done.')
       ctx.audit(serverId, 'swap', `size=${opts.sizeGb ?? 'keep'} swappiness=${swappiness}`)
     })

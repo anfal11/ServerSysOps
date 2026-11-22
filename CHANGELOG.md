@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 – 2026-11-22
+
+**Renamed:** Central Server is now **ServerSysOps**. Installed copies keep their servers, settings and snippets (data is migrated on first start), backup files made by the old name still import, and the installer replaces an existing Central Server install instead of adding a second app. Files the app writes on servers now use the `serversysops` prefix; two-factor auth, key-only logins, SSH hardening or runtime shims set up with 0.2.0/0.3.0 are not recognised under the old prefix and should be applied again from this version (the old files stay in place).
+
+### Fixed
+- **Cancel really stops the command.** Cancelling a task (for example following container logs) killed nothing on the server and stayed "running" until the command happened to write again. Cancellable commands now run in their own process group, Cancel kills that group, and the task ends within two seconds either way. Timed-out commands are killed the same way.
+
 ## 0.3.0 – 2026-11-22
 
 ### New

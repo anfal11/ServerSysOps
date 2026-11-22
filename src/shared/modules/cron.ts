@@ -63,7 +63,7 @@ export interface SystemdTimer {
 }
 
 /** Marker written on the line above a disabled job so plain comments are never mistaken for jobs. */
-export const CRON_DISABLED_MARKER = '# centralserver:disabled'
+export const CRON_DISABLED_MARKER = '# serversysops:disabled'
 
 export const CRON_ALIASES = ['@reboot', '@yearly', '@annually', '@monthly', '@weekly', '@daily', '@midnight', '@hourly'] as const
 

@@ -7,7 +7,7 @@ import type { SshClient } from '../ssh/SshClient'
 import { assertAbsPath, assertSafeName, shq } from '../ssh/shell'
 import { installCmd, runPkg } from './pkg'
 
-const BACKUP_DIR = '/var/backups/centralserver'
+const BACKUP_DIR = '/var/backups/serversysops'
 const SYSTEM_DIRS = ['/etc/cron.d', '/etc/cron.daily', '/etc/cron.weekly', '/etc/cron.hourly', '/etc/cron.monthly']
 const VAR_RE = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/
 
@@ -127,7 +127,7 @@ function oneLine(s: string): string {
 
 export function serializeCrontab(header: string[], variables: CronVariable[], jobs: CronSaveInput['jobs']): string {
   const out: string[] = []
-  const hdr = header.length ? header : ['# Crontab managed with Central Server. Edit here or with `crontab -e`.', '# Lines after "# centralserver:disabled" are jobs that are switched off.']
+  const hdr = header.length ? header : ['# Crontab managed with ServerSysOps. Edit here or with `crontab -e`.', '# Lines after "# serversysops:disabled" are jobs that are switched off.']
   out.push(...hdr)
   out.push('')
   if (variables.length) {
@@ -188,7 +188,7 @@ async function backupCrontab(ssh: SshClient, user: string, current: string): Pro
     /* fall through to home-dir backup */
   }
   // Fallback for logins without root: keep the copy in the home directory.
-  await ssh.exec(`mkdir -p ~/.centralserver/backups && printf %s ${shq(b64)} | base64 -d > ~/.centralserver/backups/crontab-${shq(user)}-${ts}`, { timeoutMs: 15000 }).catch(() => undefined)
+  await ssh.exec(`mkdir -p ~/.serversysops/backups && printf %s ${shq(b64)} | base64 -d > ~/.serversysops/backups/crontab-${shq(user)}-${ts}`, { timeoutMs: 15000 }).catch(() => undefined)
 }
 
 /** Install a crontab from text; crontab(1) validates the syntax and refuses bad files. */

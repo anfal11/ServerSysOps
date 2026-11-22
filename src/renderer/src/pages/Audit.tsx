@@ -36,7 +36,7 @@ export default function Audit({ serverId }: PageProps): React.JSX.Element {
     const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = `centralserver-activity-${new Date().toISOString().slice(0, 10)}.json`
+    a.download = `serversysops-activity-${new Date().toISOString().slice(0, 10)}.json`
     a.click()
     setTimeout(() => URL.revokeObjectURL(a.href), 2000)
   }
@@ -77,7 +77,7 @@ export default function Audit({ serverId }: PageProps): React.JSX.Element {
           <Loading />
         ) : !data?.length ? (
           <Card>
-            <EmptyState icon={<History />} title="No activity yet" description="Every change Central Server makes on a server (installs, service restarts, firewall rules, commands you run…) is recorded here, locally on this computer." />
+            <EmptyState icon={<History />} title="No activity yet" description="Every change ServerSysOps makes on a server (installs, service restarts, firewall rules, commands you run…) is recorded here, locally on this computer." />
           </Card>
         ) : (
           <Card flush>

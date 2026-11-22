@@ -67,7 +67,7 @@ export default function AuthPromptModal(): React.JSX.Element | null {
           </Field>
         ))}
       </form>
-      <div className="text-[11px] text-dim mt-4">Tip: store the TOTP secret in the server profile (Edit server → 2FA secret) and Central Server fills the code automatically.</div>
+      <div className="text-[11px] text-dim mt-4">Tip: store the TOTP secret in the server profile (Edit server → 2FA secret) and ServerSysOps fills the code automatically.</div>
     </Modal>
   )
 }

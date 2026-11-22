@@ -326,7 +326,7 @@ export function isStrongSqlPassword(pw: string): boolean {
   return pw.length >= 8 && pw.length <= 128 && /[A-Z]/.test(pw) && /[a-z]/.test(pw) && /[0-9]/.test(pw) && /[^A-Za-z0-9]/.test(pw)
 }
 
-export const DB_BACKUPS_DIR = '/var/backups/centralserver'
+export const DB_BACKUPS_DIR = '/var/backups/serversysops'
 export const MSSQL_BACKUP_DIR = '/var/opt/mssql/backup'
 export const MSSQL_EULA_URL = 'https://go.microsoft.com/fwlink/?linkid=2104294'
 export const DB_ROWS_MAX_LIMIT = 1000

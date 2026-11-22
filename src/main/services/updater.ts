@@ -18,7 +18,7 @@ export function register(ctx: Ctx): void {
     autoUpdater.on('update-available', (info) => {
       ctx.emit({ type: 'update', status: 'available', info })
       try {
-        if (Notification.isSupported()) new Notification({ title: `Central Server ${info.version} is available`, body: 'Open the app and click "Update" in the top bar to install it.', icon: appIcon() }).show()
+        if (Notification.isSupported()) new Notification({ title: `ServerSysOps ${info.version} is available`, body: 'Open the app and click "Update" in the top bar to install it.', icon: appIcon() }).show()
       } catch {
         /* ignore */
       }

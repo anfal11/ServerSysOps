@@ -83,7 +83,7 @@ export interface GoStatus {
   arch: string
   versions: GoManagedVersion[]
   defaultVersion?: string
-  /** /usr/local/go exists and is a real directory (not managed by Central Server). */
+  /** /usr/local/go exists and is a real directory (not managed by ServerSysOps). */
   usrLocalGoIsDir: boolean
   others: { path: string; version: string }[]
   available: GoAvailableVersion[]

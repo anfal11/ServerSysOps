@@ -45,7 +45,7 @@ function notify(): void {
 function installListener(): void {
   if (listenerInstalled) return
   listenerInstalled = true
-  window.addEventListener('centralserver:theme', () => {
+  window.addEventListener('serversysops:theme', () => {
     const theme = terminalTheme()
     for (const s of registry.values()) for (const tab of s.tabs) tab.term.options.theme = theme
   })

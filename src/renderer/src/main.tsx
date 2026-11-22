@@ -5,8 +5,8 @@ import App from './App'
 import { useApp } from './store/app'
 import { applyTheme } from './lib/themes'
 
-// Debug handle for automated UI checks (DevTools): window.__centralserver.useApp.getState()
-;(window as unknown as { __centralserver: unknown }).__centralserver = { useApp, applyTheme }
+// Debug handle for automated UI checks (DevTools): window.__serversysops.useApp.getState()
+;(window as unknown as { __serversysops: unknown }).__serversysops = { useApp, applyTheme }
 
 // `#gallery` renders the design gallery (every UI element with sample data) for theme QA.
 const Gallery = React.lazy(() => import('./pages/Gallery'))

@@ -341,8 +341,8 @@ function buildReport(out: string, pkgManager: string, durationMs: number): Secur
 /* Hardening helpers                                                   */
 /* ------------------------------------------------------------------ */
 
-const SYSCTL_FILE = '/etc/sysctl.d/99-centralserver-hardening.conf'
-const SYSCTL_CONTENT = `# Managed by Central Server - kernel/network hardening (safe defaults)
+const SYSCTL_FILE = '/etc/sysctl.d/99-serversysops-hardening.conf'
+const SYSCTL_CONTENT = `# Managed by ServerSysOps - kernel/network hardening (safe defaults)
 kernel.randomize_va_space = 2
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
@@ -361,8 +361,8 @@ fs.protected_hardlinks = 1
 fs.protected_symlinks = 1
 `
 
-const SSHD_HARDEN_DROPIN = '/etc/ssh/sshd_config.d/01-centralserver-hardening.conf'
-const SSHD_HARDEN_CONTENT = `# Managed by Central Server - SSH hardening
+const SSHD_HARDEN_DROPIN = '/etc/ssh/sshd_config.d/01-serversysops-hardening.conf'
+const SSHD_HARDEN_CONTENT = `# Managed by ServerSysOps - SSH hardening
 MaxAuthTries 4
 X11Forwarding no
 PermitEmptyPasswords no
@@ -371,8 +371,8 @@ ClientAliveInterval 300
 ClientAliveCountMax 2
 AllowTcpForwarding yes
 `
-const BLOCK_START = '# >>> Central Server hardening >>>'
-const BLOCK_END = '# <<< Central Server hardening <<<'
+const BLOCK_START = '# >>> ServerSysOps hardening >>>'
+const BLOCK_END = '# <<< ServerSysOps hardening <<<'
 
 async function writeRootFile(ssh: SshClient, path: string, content: string, mode = '644'): Promise<void> {
   await ssh.sudoRun(`mkdir -p $(dirname ${shq(path)}) && ${b64Echo(content)} > ${shq(path)} && chmod ${mode} ${shq(path)}`)
@@ -449,7 +449,7 @@ export function register(ctx: Ctx): void {
       } else {
         const block = `${BLOCK_START}\n${SSHD_HARDEN_CONTENT}${BLOCK_END}\n`
         await ssh.sudoRun(
-          `cp -p /etc/ssh/sshd_config /etc/ssh/sshd_config.centralserver-hardening.bak && t=$(mktemp) && sed -i '/^${BLOCK_START}$/,/^${BLOCK_END}$/d' /etc/ssh/sshd_config && sed -i -E '/^\\s*(MaxAuthTries|X11Forwarding|PermitEmptyPasswords|LoginGraceTime|ClientAliveInterval|ClientAliveCountMax)\\s/d' /etc/ssh/sshd_config && ${b64Echo(block)} | cat - /etc/ssh/sshd_config > "$t" && install -m 644 "$t" /etc/ssh/sshd_config; rc=$?; rm -f "$t"; exit $rc`
+          `cp -p /etc/ssh/sshd_config /etc/ssh/sshd_config.serversysops-hardening.bak && t=$(mktemp) && sed -i '/^${BLOCK_START}$/,/^${BLOCK_END}$/d' /etc/ssh/sshd_config && sed -i -E '/^\\s*(MaxAuthTries|X11Forwarding|PermitEmptyPasswords|LoginGraceTime|ClientAliveInterval|ClientAliveCountMax)\\s/d' /etc/ssh/sshd_config && ${b64Echo(block)} | cat - /etc/ssh/sshd_config > "$t" && install -m 644 "$t" /etc/ssh/sshd_config; rc=$?; rm -f "$t"; exit $rc`
         )
       }
       h.log('Testing configuration and reloading sshd…')
@@ -460,7 +460,7 @@ export function register(ctx: Ctx): void {
         if (includes) {
           if (hadDropin) await writeRootFile(ssh, SSHD_HARDEN_DROPIN, prevDropin)
           else await ssh.sudo(`rm -f ${SSHD_HARDEN_DROPIN}`)
-        } else await ssh.sudo('cp /etc/ssh/sshd_config.centralserver-hardening.bak /etc/ssh/sshd_config')
+        } else await ssh.sudo('cp /etc/ssh/sshd_config.serversysops-hardening.bak /etc/ssh/sshd_config')
         throw e
       }
       await new Promise((r) => setTimeout(r, 1200))
@@ -471,7 +471,7 @@ export function register(ctx: Ctx): void {
         if (includes) {
           if (hadDropin) await writeRootFile(ssh, SSHD_HARDEN_DROPIN, prevDropin)
           else await ssh.sudo(`rm -f ${SSHD_HARDEN_DROPIN}`)
-        } else await ssh.sudo('cp /etc/ssh/sshd_config.centralserver-hardening.bak /etc/ssh/sshd_config')
+        } else await ssh.sudo('cp /etc/ssh/sshd_config.serversysops-hardening.bak /etc/ssh/sshd_config')
         await sshdReload(ssh).catch(() => {})
         throw new Error('Could not log in after applying the hardening; previous configuration restored.')
       }

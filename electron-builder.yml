@@ -1,5 +1,5 @@
-appId: com.centralserver.app
-productName: Central Server
+appId: com.serversysops.app
+productName: ServerSysOps
 directories:
   buildResources: build
   output: release
@@ -18,16 +18,19 @@ win:
       arch: [x64]
     - target: portable
       arch: [x64]
-  artifactName: CentralServer_${version}_${arch}-setup.${ext}
+  artifactName: ServerSysOps_${version}_${arch}-setup.${ext}
   icon: build/icon.ico
 portable:
-  artifactName: CentralServer_${version}_${arch}-portable.${ext}
+  artifactName: ServerSysOps_${version}_${arch}-portable.${ext}
 nsis:
+  # Uninstall-registry identity of the 0.2.x/0.3.0 'Central Server' installer (uuid v5 of its appId).
+  # Keeping it lets the in-app update replace that install instead of adding a second app.
+  guid: 289adea8-a466-5993-b2cc-1f2f63fe174c
   oneClick: false
   allowToChangeInstallationDirectory: true
   perMachine: false
   createDesktopShortcut: true
-  shortcutName: Central Server
+  shortcutName: ServerSysOps
 mac:
   category: public.app-category.developer-tools
   target: [dmg]
@@ -41,5 +44,5 @@ linux:
 publish:
   provider: github
   owner: anfal11
-  repo: CentralServer
+  repo: ServerSysOps
 npmRebuild: false

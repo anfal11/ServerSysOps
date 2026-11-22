@@ -708,7 +708,7 @@ function DatabasesTable({ serverId, engine, dbs, onBrowse, onCredentials }: { se
   }
   const backup = async (d: DbDatabase): Promise<void> => {
     const id = await run(() => api.call<string>('db:backup', serverId, engine, d.name))
-    if (id) toastInfo(`Backing up ${d.name}…`, 'The dump is written to /var/backups/centralserver (see Tasks).')
+    if (id) toastInfo(`Backing up ${d.name}…`, 'The dump is written to /var/backups/serversysops (see Tasks).')
   }
 
   const list = (dbs.data ?? []).filter((d) => (showSystem || !d.system) && (!filter || d.name.toLowerCase().includes(filter.toLowerCase())))
@@ -2747,7 +2747,7 @@ function RedisConfigCard({ serverId, st, reload }: { serverId: string; st: DbEng
         )}
       </Card>
       <Callout>
-        Directives are replaced in place (other lines and comments are kept); missing ones are appended under a <code># Added by Central Server</code> marker. A timestamped backup <span className="font-mono">redis.conf.bak-…</span> is written next to the file before every change.
+        Directives are replaced in place (other lines and comments are kept); missing ones are appended under a <code># Added by ServerSysOps</code> marker. A timestamped backup <span className="font-mono">redis.conf.bak-…</span> is written next to the file before every change.
       </Callout>
     </div>
   )

@@ -1,6 +1,6 @@
-# Central Server module guide (for contributors and code generators)
+# ServerSysOps module guide (for contributors and code generators)
 
-Central Server is an Electron + React + TypeScript desktop app that manages Linux servers over SSH only (no agent on the server).
+ServerSysOps is an Electron + React + TypeScript desktop app that manages Linux servers over SSH only (no agent on the server).
 Every feature is a **module** made of two files:
 
 | Part | Path | Runs in |

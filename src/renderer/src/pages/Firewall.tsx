@@ -62,7 +62,7 @@ export default function Firewall({ serverId }: PageProps): React.JSX.Element {
             </p>
             <Callout kind="info">
               <ShieldCheck size={13} className="inline mr-1" />
-              Port <b>{state.sshPorts.join(', ')}</b> (SSH) is always allowed before enabling. Central Server then opens a second SSH connection to verify access; if that probe fails the firewall is disabled again automatically.
+              Port <b>{state.sshPorts.join(', ')}</b> (SSH) is always allowed before enabling. ServerSysOps then opens a second SSH connection to verify access; if that probe fails the firewall is disabled again automatically.
             </Callout>
           </div>
         ),

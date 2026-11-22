@@ -12,15 +12,15 @@ import { probeLogin } from '../ssh/probe'
 /* ------------------------------------------------------------------ */
 
 const PAM_FILE = '/etc/pam.d/sshd'
-const PAM_BACKUP = '/etc/pam.d/sshd.centralserver.bak'
-const SSHD_DROPIN = '/etc/ssh/sshd_config.d/00-centralserver-2fa.conf'
-const SSHD_DROPIN_BASENAME = '00-centralserver-2fa.conf'
+const PAM_BACKUP = '/etc/pam.d/sshd.serversysops.bak'
+const SSHD_DROPIN = '/etc/ssh/sshd_config.d/00-serversysops-2fa.conf'
+const SSHD_DROPIN_BASENAME = '00-serversysops-2fa.conf'
 const SSHD_CONFIG = '/etc/ssh/sshd_config'
-const SSHD_BACKUP = '/etc/ssh/sshd_config.centralserver-2fa.bak'
-const MARKER = '# Central Server 2FA'
+const SSHD_BACKUP = '/etc/ssh/sshd_config.serversysops-2fa.bak'
+const MARKER = '# ServerSysOps 2FA'
 const MARKER_DISABLED = `${MARKER} disabled:`
-const BLOCK_BEGIN = '# BEGIN Central Server 2FA'
-const BLOCK_END = '# END Central Server 2FA'
+const BLOCK_BEGIN = '# BEGIN ServerSysOps 2FA'
+const BLOCK_END = '# END ServerSysOps 2FA'
 const PAM_SO = 'pam_google_authenticator.so'
 const MODES: TfaMode[] = ['off', 'password+code', 'key+code', 'key-or-code']
 /** Lines in /etc/pam.d/sshd that pull in the password stack (Debian, RHEL, SUSE, Arch, Alpine). */
@@ -136,7 +136,7 @@ function needsEpel(ssh: SshClient): boolean {
 /* PAM editing                                                         */
 /* ------------------------------------------------------------------ */
 
-/** Remove every Central Server-managed line from /etc/pam.d/sshd and restore the lines it commented out. */
+/** Remove every ServerSysOps-managed line from /etc/pam.d/sshd and restore the lines it commented out. */
 function pamStrip(content: string): string[] {
   const out: string[] = []
   for (const line of content.replace(/\r/g, '').split('\n')) {
@@ -201,7 +201,7 @@ function authMethods(mode: TfaMode): string {
 function dropinContent(mode: TfaMode, nullok: boolean): string {
   return [
     `${MARKER} mode=${mode} nullok=${nullok ? 'yes' : 'no'}`,
-    '# Managed by Central Server - two-factor authentication for SSH logins. Do not edit; use the app.',
+    '# Managed by ServerSysOps - two-factor authentication for SSH logins. Do not edit; use the app.',
     'UsePAM yes',
     'KbdInteractiveAuthentication yes',
     'ChallengeResponseAuthentication yes',
@@ -213,7 +213,7 @@ function dropinContent(mode: TfaMode, nullok: boolean): string {
 }
 
 function parseDropinMode(text: string): { mode: TfaMode; nullok: boolean } {
-  const m = text.match(/^# Central Server 2FA mode=(\S+) nullok=(yes|no)/m)
+  const m = text.match(/^# ServerSysOps 2FA mode=(\S+) nullok=(yes|no)/m)
   if (m && (MODES as string[]).includes(m[1])) return { mode: m[1] as TfaMode, nullok: m[2] === 'yes' }
   const am = text.match(/^\s*AuthenticationMethods\s+(.+)$/im)?.[1].trim().toLowerCase()
   if (am === 'keyboard-interactive') return { mode: 'password+code', nullok: true }
@@ -252,7 +252,7 @@ echo __DROPIN; cat ${SSHD_DROPIN} 2>/dev/null; sed -n '/^${BLOCK_BEGIN}$/,/^${BL
 echo __INCLUDE; grep -qiE '^\\s*Include\\s+/etc/ssh/sshd_config.d' ${SSHD_CONFIG} 2>/dev/null && echo yes
 echo __OTHERS; for f in /etc/ssh/sshd_config.d/*.conf; do [ -f "$f" ] && awk -v F="$f" 'tolower($1)=="match"{exit} {print F":"$0}' "$f"; done 2>/dev/null | grep -iE ':[[:space:]]*((KbdInteractiveAuthentication|ChallengeResponseAuthentication|UsePAM)[[:space:]]+no|AuthenticationMethods[[:space:]])'
 echo __MAIN; awk 'tolower($1)=="include"||tolower($1)=="match"{exit} {print}' ${SSHD_CONFIG} 2>/dev/null | grep -iE '^[[:space:]]*((KbdInteractiveAuthentication|ChallengeResponseAuthentication|UsePAM)[[:space:]]+no|AuthenticationMethods[[:space:]])'
-echo __KEYONLY; grep -ihE '^\\s*Match\\s+User' /etc/ssh/sshd_config.d/00-centralserver-users.conf ${SSHD_CONFIG} 2>/dev/null | awk '{print $3}'
+echo __KEYONLY; grep -ihE '^\\s*Match\\s+User' /etc/ssh/sshd_config.d/00-serversysops-users.conf ${SSHD_CONFIG} 2>/dev/null | awk '{print $3}'
 echo __HOST; hostname 2>/dev/null
 echo __USERS; getent passwd | awk -F: '($3==0 || $3>=1000) && $3<60000 {print $1":"$3":"$6":"$7}'
 echo __ENROLLED; getent passwd | awk -F: '($3==0 || $3>=1000) && $3<60000 {print $1":"$6}' | while IFS=: read -r u h; do [ -f "$h/.google_authenticator" ] && echo "$u"; done
@@ -383,11 +383,11 @@ async function applyConfig(ctx: Ctx, serverId: string, mode: TfaMode, nullok: bo
   }
 
   try {
-    log(mode === 'off' ? 'Removing the Central Server lines from /etc/pam.d/sshd…' : `Writing /etc/pam.d/sshd (${mode}${nullok ? ', nullok' : ''})…`)
+    log(mode === 'off' ? 'Removing the ServerSysOps lines from /etc/pam.d/sshd…' : `Writing /etc/pam.d/sshd (${mode}${nullok ? ', nullok' : ''})…`)
     await writeRootFile(ssh, PAM_FILE, pamBuild(pamCur, mode, nullok))
 
     if (mode === 'off') {
-      log(includes ? `Removing ${SSHD_DROPIN}…` : `Removing the Central Server 2FA block from ${SSHD_CONFIG}…`)
+      log(includes ? `Removing ${SSHD_DROPIN}…` : `Removing the ServerSysOps 2FA block from ${SSHD_CONFIG}…`)
       if (includes) await rootExec(ssh, `rm -f ${SSHD_DROPIN}`)
       // Clean a block left over from an earlier Include-less setup as well.
       await writeSshdBlock(ssh, null)
@@ -410,13 +410,13 @@ async function applyConfig(ctx: Ctx, serverId: string, mode: TfaMode, nullok: bo
     await sshdReload(ssh)
     await sleep(1500)
 
-    log('Verifying that Central Server can still log in with the saved credentials…')
+    log('Verifying that ServerSysOps can still log in with the saved credentials…')
     let ok = await probeLogin(ctx, serverId, ssh.profile.port)
     if (!ok) {
       await sleep(2000)
       ok = await probeLogin(ctx, serverId, ssh.profile.port)
     }
-    if (!ok) throw new Error(mode === 'off' ? 'Login verification failed after disabling two-factor authentication.' : 'Central Server could not log back in with the new rules (wrong secret, PAM module problem or the server rejected keyboard-interactive).')
+    if (!ok) throw new Error(mode === 'off' ? 'Login verification failed after disabling two-factor authentication.' : 'ServerSysOps could not log back in with the new rules (wrong secret, PAM module problem or the server rejected keyboard-interactive).')
     log('Login verified.')
   } catch (e) {
     await rollback((e as Error).message)
@@ -501,7 +501,7 @@ export function register(ctx: Ctx): void {
     const hostname = ssh.os?.hostname || ssh.profile.host
     const account = `${user}@${hostname}`
     ctx.audit(serverId, 'tfa.enroll', `${user}${opts.force ? ' (re-enrolled)' : ''}${saveToProfile ? ' secret saved in profile' : ''}`)
-    return { secret, otpauthUrl: otpauthUrl(secret, account, `Central Server ${hostname}`), scratchCodes: codes, savedToProfile: saveToProfile, account }
+    return { secret, otpauthUrl: otpauthUrl(secret, account, `ServerSysOps ${hostname}`), scratchCodes: codes, savedToProfile: saveToProfile, account }
   })
 
   // ---------------- verify a code against a user's file ----------------
@@ -524,7 +524,7 @@ export function register(ctx: Ctx): void {
     const self = user === selfUser(ssh)
     if (self) {
       const st = await readStatus(ctx, serverId)
-      if (st.mode !== 'off' && !st.nullok) throw new Error('Two-factor authentication is enforced without nullok: removing the enrollment of the login account would lock Central Server out. Disable enforcement first.')
+      if (st.mode !== 'off' && !st.nullok) throw new Error('Two-factor authentication is enforced without nullok: removing the enrollment of the login account would lock ServerSysOps out. Disable enforcement first.')
     }
     const { home } = await userHome(ssh, user)
     await rootRun(ssh, `rm -f ${shq(`${home}/.google_authenticator`)}`)
@@ -545,7 +545,7 @@ export function register(ctx: Ctx): void {
     const st = await readStatus(ctx, serverId)
     if (!st.pamModuleInstalled) throw new Error('The Google Authenticator PAM module is not installed (step 1).')
     const me = st.users.find((u) => u.name === st.loginUser)
-    if (!me?.enrolled) throw new Error(`The login account ${st.loginUser} is not enrolled. Enroll it first so Central Server can verify the new rules without locking itself out.`)
+    if (!me?.enrolled) throw new Error(`The login account ${st.loginUser} is not enrolled. Enroll it first so ServerSysOps can verify the new rules without locking itself out.`)
     if (!st.profileHasTotp) throw new Error(`The server profile does not hold the TOTP secret of ${st.loginUser}. Re-enroll the login account with "Save secret in this app" enabled.`)
     if (mode === 'key+code' && st.profileAuth === 'password') throw new Error('"Key + code" requires the app to log in with an SSH key, but this profile uses a password. Switch the profile to key authentication or choose "password + code".')
     if (mode === 'password+code' && st.profileAuth !== 'password' && !st.profileHasPassword) throw new Error('"Password + code" makes the app\'s SSH key useless and this profile has no stored password. Choose "key + code" or "key or code".')
@@ -554,7 +554,7 @@ export function register(ctx: Ctx): void {
       /* marker block at the top of sshd_config wins; nothing to check */
     } else if (st.conflicts.length) {
       const c = st.conflicts[0]
-      throw new Error(`${c.file} sets "${c.line}" before the Central Server 2FA drop-in is read, which would disable keyboard-interactive logins. Fix that first (Overview → SSH login rules controls 00-centralserver.conf).`)
+      throw new Error(`${c.file} sets "${c.line}" before the ServerSysOps 2FA drop-in is read, which would disable keyboard-interactive logins. Fix that first (Overview → SSH login rules controls 00-serversysops.conf).`)
     }
 
     const { id } = ctx.tasks.start(`Enable two-factor authentication (${mode})`, serverId, async (h) => {

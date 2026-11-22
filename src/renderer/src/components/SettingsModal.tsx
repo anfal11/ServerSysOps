@@ -27,7 +27,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
       width="max-w-2xl"
       footer={
         <>
-          <span className="text-dim text-xs mr-auto">Central Server v{version}</span>
+          <span className="text-dim text-xs mr-auto">ServerSysOps v{version}</span>
           <Button
             onClick={() => {
               applyTheme(settings.theme)

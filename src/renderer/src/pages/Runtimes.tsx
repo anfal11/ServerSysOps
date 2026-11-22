@@ -112,7 +112,7 @@ function NodeTab({ serverId }: PageProps): React.JSX.Element {
   if (loading || !data) return <Loading />
 
   const removeVersion = async (v: string): Promise<void> => {
-    if (!(await confirm({ title: `Remove Node.js ${v}`, message: <>Delete <b className="font-mono">/opt/centralserver/node/{v}</b>? Projects pinned to this version will fail until it is reinstalled.</>, danger: true, confirmLabel: 'Delete' }))) return
+    if (!(await confirm({ title: `Remove Node.js ${v}`, message: <>Delete <b className="font-mono">/opt/serversysops/node/{v}</b>? Projects pinned to this version will fail until it is reinstalled.</>, danger: true, confirmLabel: 'Delete' }))) return
     await run(() => api.call('rt:node:remove', serverId, v), { success: `Removed Node.js ${v}` })
     await reload()
   }
@@ -143,7 +143,7 @@ function NodeTab({ serverId }: PageProps): React.JSX.Element {
         <Table
           rows={data.versions}
           rowKey={(r) => r.version}
-          empty={<span>No Node.js version installed by Central Server yet. Pick one below.</span>}
+          empty={<span>No Node.js version installed by ServerSysOps yet. Pick one below.</span>}
           columns={[
             {
               key: 'version',
@@ -182,7 +182,7 @@ function NodeTab({ serverId }: PageProps): React.JSX.Element {
       <div className="mt-3">
         <Callout>
           <code className="font-mono">node</code>, <code className="font-mono">npm</code>, <code className="font-mono">npx</code>, <code className="font-mono">corepack</code> in <code className="font-mono">/usr/local/bin</code> run the version a project asks for in <code className="font-mono">.nvmrc</code> or{' '}
-          <code className="font-mono">.node-version</code> (in its folder or above), or in <code className="font-mono">CENTRALSERVER_NODE_VERSION</code>, and the default otherwise. A version that isn&apos;t installed fails with a message. Global npm packages are
+          <code className="font-mono">.node-version</code> (in its folder or above), or in <code className="font-mono">SERVERSYSOPS_NODE_VERSION</code>, and the default otherwise. A version that isn&apos;t installed fails with a message. Global npm packages are
           installed in <code className="font-mono">/usr/local</code>, shared by all versions.
         </Callout>
       </div>
@@ -211,7 +211,7 @@ function NodeTab({ serverId }: PageProps): React.JSX.Element {
               columns={[
                 { key: 'path', header: 'Location', mono: true, render: (r) => r.path },
                 { key: 'version', header: 'Version', mono: true, render: (r) => r.version },
-                { key: 'note', header: '', align: 'right', render: () => <Badge>Not managed by Central Server</Badge> }
+                { key: 'note', header: '', align: 'right', render: () => <Badge>Not managed by ServerSysOps</Badge> }
               ]}
             />
           </Card>
@@ -324,7 +324,7 @@ function BunTab({ serverId }: PageProps): React.JSX.Element {
   if (loading || !data) return <Loading />
 
   const remove = async (): Promise<void> => {
-    if (!(await confirm({ title: 'Remove Bun', message: <>Delete <b className="font-mono">/opt/centralserver/bun</b> and the <code className="font-mono">bun</code>/<code className="font-mono">bunx</code> links in /usr/local/bin?</>, danger: true, confirmLabel: 'Remove' }))) return
+    if (!(await confirm({ title: 'Remove Bun', message: <>Delete <b className="font-mono">/opt/serversysops/bun</b> and the <code className="font-mono">bun</code>/<code className="font-mono">bunx</code> links in /usr/local/bin?</>, danger: true, confirmLabel: 'Remove' }))) return
     await run(() => api.call('rt:bun:remove', serverId), { success: 'Bun removed' })
     await reload()
   }
@@ -368,7 +368,7 @@ function BunTab({ serverId }: PageProps): React.JSX.Element {
           />
         ) : (
           <p className="text-xs text-muted leading-relaxed">
-            Installs Bun with the official installer into <code className="font-mono">/opt/centralserver/bun</code> and links <code className="font-mono">bun</code> and <code className="font-mono">bunx</code> into <code className="font-mono">/usr/local/bin</code> so every user can run them.
+            Installs Bun with the official installer into <code className="font-mono">/opt/serversysops/bun</code> and links <code className="font-mono">bun</code> and <code className="font-mono">bunx</code> into <code className="font-mono">/usr/local/bin</code> so every user can run them.
           </p>
         )}
       </Card>
@@ -383,7 +383,7 @@ function BunTab({ serverId }: PageProps): React.JSX.Element {
               columns={[
                 { key: 'path', header: 'Location', mono: true, render: (r) => r.path },
                 { key: 'version', header: 'Version', mono: true, render: (r) => r.version },
-                { key: 'note', header: '', align: 'right', render: () => <Badge>Not managed by Central Server</Badge> }
+                { key: 'note', header: '', align: 'right', render: () => <Badge>Not managed by ServerSysOps</Badge> }
               ]}
             />
           </Card>
@@ -425,7 +425,7 @@ function GoTab({ serverId }: PageProps): React.JSX.Element {
   if (loading || !data) return <Loading />
 
   const removeVersion = async (v: string): Promise<void> => {
-    if (!(await confirm({ title: `Remove Go ${v}`, message: <>Delete <b className="font-mono">/opt/centralserver/go/{v}</b>?</>, danger: true, confirmLabel: 'Delete' }))) return
+    if (!(await confirm({ title: `Remove Go ${v}`, message: <>Delete <b className="font-mono">/opt/serversysops/go/{v}</b>?</>, danger: true, confirmLabel: 'Delete' }))) return
     await run(() => api.call('rt:go:remove', serverId, v), { success: `Removed Go ${v}` })
     await reload()
   }
@@ -445,7 +445,7 @@ function GoTab({ serverId }: PageProps): React.JSX.Element {
         <Table
           rows={data.versions}
           rowKey={(r) => r.version}
-          empty="No Go toolchain installed by Central Server yet. Pick one below."
+          empty="No Go toolchain installed by ServerSysOps yet. Pick one below."
           columns={[
             {
               key: 'version',
@@ -482,14 +482,14 @@ function GoTab({ serverId }: PageProps): React.JSX.Element {
       </Card>
       <div className="mt-3">
         <Callout>
-          The default version is linked at <code className="font-mono">/usr/local/go</code>; <code className="font-mono">/etc/profile.d/centralserver-go.sh</code> adds <code className="font-mono">/usr/local/go/bin</code> to the PATH of login shells and <code className="font-mono">go</code>/<code className="font-mono">gofmt</code> are linked into{' '}
-          <code className="font-mono">/usr/local/bin</code>. Other versions can be used directly from <code className="font-mono">/opt/centralserver/go/&lt;version&gt;/bin/go</code>.
+          The default version is linked at <code className="font-mono">/usr/local/go</code>; <code className="font-mono">/etc/profile.d/serversysops-go.sh</code> adds <code className="font-mono">/usr/local/go/bin</code> to the PATH of login shells and <code className="font-mono">go</code>/<code className="font-mono">gofmt</code> are linked into{' '}
+          <code className="font-mono">/usr/local/bin</code>. Other versions can be used directly from <code className="font-mono">/opt/serversysops/go/&lt;version&gt;/bin/go</code>.
         </Callout>
       </div>
       {data.usrLocalGoIsDir && (
         <div className="mt-3">
           <Callout kind="warn">
-            <code className="font-mono">/usr/local/go</code> is an existing installation not managed by Central Server. To switch to a managed version move it away first, e.g. <code className="font-mono">mv /usr/local/go /usr/local/go.old</code>.
+            <code className="font-mono">/usr/local/go</code> is an existing installation not managed by ServerSysOps. To switch to a managed version move it away first, e.g. <code className="font-mono">mv /usr/local/go /usr/local/go.old</code>.
           </Callout>
         </div>
       )}
@@ -504,7 +504,7 @@ function GoTab({ serverId }: PageProps): React.JSX.Element {
               columns={[
                 { key: 'path', header: 'Location', mono: true, render: (r) => r.path },
                 { key: 'version', header: 'Version', mono: true, render: (r) => r.version },
-                { key: 'note', header: '', align: 'right', render: () => <Badge>Not managed by Central Server</Badge> }
+                { key: 'note', header: '', align: 'right', render: () => <Badge>Not managed by ServerSysOps</Badge> }
               ]}
             />
           </Card>
@@ -576,7 +576,7 @@ function PhpTab({ serverId }: PageProps): React.JSX.Element {
       </div>
       {data.versions.length === 0 ? (
         <Card>
-          <EmptyState icon={<Package />} title="PHP is not installed" description="Install a version below. Central Server installs php-fpm, the CLI and the most common extensions (mbstring, xml, curl, zip, opcache)." />
+          <EmptyState icon={<Package />} title="PHP is not installed" description="Install a version below. ServerSysOps installs php-fpm, the CLI and the most common extensions (mbstring, xml, curl, zip, opcache)." />
         </Card>
       ) : (
         <div className="space-y-4">
@@ -826,7 +826,7 @@ function PhpVersionCard({ serverId, status, v, reload, onRemove }: { serverId: s
               Save
             </Button>
           </div>
-          <div className="text-[11px] text-dim mt-2 leading-relaxed">A backup is written next to php.ini (php.ini.centralserver.bak); FPM changes are tested with php-fpm -t before FPM is restarted.</div>
+          <div className="text-[11px] text-dim mt-2 leading-relaxed">A backup is written next to php.ini (php.ini.serversysops.bak); FPM changes are tested with php-fpm -t before FPM is restarted.</div>
         </div>
       </div>
     </Card>

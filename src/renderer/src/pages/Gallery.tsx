@@ -18,8 +18,8 @@ export default function Gallery(): React.JSX.Element {
   }, [theme])
   useEffect(() => {
     const onTheme = (): void => setTheme(document.documentElement.dataset.theme ?? 'graphite')
-    window.addEventListener('centralserver:theme', onTheme)
-    return () => window.removeEventListener('centralserver:theme', onTheme)
+    window.addEventListener('serversysops:theme', onTheme)
+    return () => window.removeEventListener('serversysops:theme', onTheme)
   }, [])
   const tt = terminalTheme()
   const nav = [
@@ -163,7 +163,7 @@ export default function Gallery(): React.JSX.Element {
                 </div>
                 <div className="mt-3 space-y-2">
                   <ErrorBox error={new Error('ssh: connect to host 203.0.113.10 port 22: Connection refused')} onRetry={() => {}} />
-                  <Callout>Store the TOTP secret in the server profile and Central Server fills the code automatically.</Callout>
+                  <Callout>Store the TOTP secret in the server profile and ServerSysOps fills the code automatically.</Callout>
                   <Callout kind="danger">This permanently deletes /var/www/old-site. Folders are removed with everything inside.</Callout>
                 </div>
               </Card>

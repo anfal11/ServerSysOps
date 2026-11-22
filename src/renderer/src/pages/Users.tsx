@@ -98,7 +98,7 @@ export default function Users({ serverId }: PageProps): React.JSX.Element {
 
   const toggleAdmin = async (u: UserInfoEx): Promise<void> => {
     if (u.isAdmin) {
-      if (!(await confirm({ title: 'Revoke admin rights', message: <>Remove <b>{u.name}</b> from the admin group and delete its Central Server sudoers entry?</>, danger: true, confirmLabel: 'Revoke' }))) return
+      if (!(await confirm({ title: 'Revoke admin rights', message: <>Remove <b>{u.name}</b> from the admin group and delete its ServerSysOps sudoers entry?</>, danger: true, confirmLabel: 'Revoke' }))) return
       await act(() => api.call('users:setAdmin', serverId, u.name, false), `${u.name} is no longer an administrator`)
     } else {
       if (!(await confirm({ title: 'Grant admin rights', message: <>Add <b>{u.name}</b> to the sudo/wheel group? The user will be able to run any command as root.</>, confirmLabel: 'Grant' }))) return
@@ -142,7 +142,7 @@ export default function Users({ serverId }: PageProps): React.JSX.Element {
               <b>{u.name} has no SSH keys.</b> Add a key first, otherwise this account cannot log in at all.
             </Callout>
           )}
-          {u.self && <Callout kind="warn">This is the account Central Server uses. If this profile logs in with a password, the change is refused to avoid locking you out.</Callout>}
+          {u.self && <Callout kind="warn">This is the account ServerSysOps uses. If this profile logs in with a password, the change is refused to avoid locking you out.</Callout>}
         </div>
       ),
       confirmLabel: 'Disable password login',
@@ -519,7 +519,7 @@ function CreateUserModal({ serverId, onClose, onDone }: { serverId: string; onCl
         </Field>
         <div className="col-span-6 border border-border rounded-md p-3 space-y-2 bg-bg-2/40">
           <Checkbox checked={f.sudo} onChange={(v) => { set('sudo', v); if (!v) set('passwordlessSudo', false) }} label={<span className="flex items-center gap-2"><Shield size={13} /> Administrator (add to the sudo / wheel group)</span>} />
-          <Checkbox checked={f.passwordlessSudo} onChange={(v) => set('passwordlessSudo', v)} disabled={!f.sudo} label={<>Passwordless sudo (<code>/etc/sudoers.d/centralserver-{(f.name || 'name').replace(/[^A-Za-z0-9_-]/g, '_')}</code>, validated with <code>visudo -cf</code>)</>} />
+          <Checkbox checked={f.passwordlessSudo} onChange={(v) => set('passwordlessSudo', v)} disabled={!f.sudo} label={<>Passwordless sudo (<code>/etc/sudoers.d/serversysops-{(f.name || 'name').replace(/[^A-Za-z0-9_-]/g, '_')}</code>, validated with <code>visudo -cf</code>)</>} />
           {f.passwordlessSudo && <Callout kind="warn">Anyone holding this account's key or password gets root without a second factor. Recommended only for automation accounts with key-only login.</Callout>}
         </div>
       </div>
@@ -690,7 +690,7 @@ function PasswordModal({ serverId, user, onClose, onDone }: { serverId: string; 
         <PasswordInput value={pw} onChange={setPw} autoFocus />
       </Field>
       {user.keyOnly && <Callout kind="info">This account is key-only: the new password works for <code>su</code>/console but SSH still requires a key.</Callout>}
-      {user.self && <Callout kind="warn">This is the account Central Server uses. Update the saved profile password afterwards.</Callout>}
+      {user.self && <Callout kind="warn">This is the account ServerSysOps uses. Update the saved profile password afterwards.</Callout>}
     </Modal>
   )
 }
@@ -762,10 +762,10 @@ function DeleteModal({ serverId, user, onClose, onDone }: { serverId: string; us
     >
       <div className="space-y-3 text-[13px]">
         <p>
-          Running processes of <b>{user.name}</b> are killed, the account is removed with <code>userdel</code> and its Central Server sudoers entry is deleted.
+          Running processes of <b>{user.name}</b> are killed, the account is removed with <code>userdel</code> and its ServerSysOps sudoers entry is deleted.
         </p>
         <Checkbox checked={removeHome} onChange={setRemoveHome} label={<>Remove home directory <code>{user.home}</code> and mail spool</>} />
-        <Checkbox checked={backupHome} onChange={setBackupHome} label={<>Archive the home directory first to <code>/var/backups/centralserver/</code> (tar.gz)</>} />
+        <Checkbox checked={backupHome} onChange={setBackupHome} label={<>Archive the home directory first to <code>/var/backups/serversysops/</code> (tar.gz)</>} />
         {removeHome && !backupHome && <Callout kind="danger">The home directory will be permanently deleted without a backup.</Callout>}
         {user.isAdmin && <Callout kind="warn">This user is an administrator.</Callout>}
         <Field label={<span>Type <b className="font-mono text-text">{user.name}</b> to confirm</span>}>

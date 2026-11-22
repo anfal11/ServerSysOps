@@ -19,8 +19,11 @@ interface BackupPayload {
   snippets: Snippet[]
 }
 
+/** Earlier product names: their backup files are still accepted. */
+const LEGACY_APP_IDS = ['central-server']
+
 interface BackupFile {
-  app: 'central-server'
+  app: 'serversysops'
   format: 1
   version: string
   createdAt: number
@@ -74,7 +77,7 @@ function readBackup(path: string): BackupFile {
   } catch {
     throw new Error('Not a valid backup file (unreadable JSON)')
   }
-  if (f?.app !== 'central-server' || f.format !== 1) throw new Error('Not a Central Server backup file')
+  if (!(f?.app === 'serversysops' || LEGACY_APP_IDS.includes(String(f?.app))) || f.format !== 1) throw new Error('Not a ServerSysOps backup file')
   return f
 }
 
@@ -84,13 +87,13 @@ export function register(ctx: Ctx): void {
     const passphrase = (opts?.passphrase ?? '').trim()
     if (includeSecrets && passphrase.length < 8) throw new Error('A passphrase of at least 8 characters is required to include passwords and keys')
     const stamp = new Date().toISOString().slice(0, 10)
-    const r = await dialog.showSaveDialog({ defaultPath: `central-server-backup-${stamp}.${EXT}.json`, filters: [{ name: 'Central Server backup', extensions: [`${EXT}.json`, 'json'] }] })
+    const r = await dialog.showSaveDialog({ defaultPath: `serversysops-backup-${stamp}.${EXT}.json`, filters: [{ name: 'ServerSysOps backup', extensions: [`${EXT}.json`, 'json'] }] })
     if (r.canceled || !r.filePath) return false
     const servers = listServers().map((s) => ({ ...s }))
     const secrets = includeSecrets ? exportAllSecrets() : undefined
     const payload: BackupPayload = { servers, secrets, settings: getSettings(), snippets: listSnippets() }
     const file: BackupFile = {
-      app: 'central-server',
+      app: 'serversysops',
       format: 1,
       version: app.getVersion(),
       createdAt: Date.now(),
@@ -105,7 +108,7 @@ export function register(ctx: Ctx): void {
   })
 
   ctx.handle('backup:inspect', async (): Promise<BackupInfo | null> => {
-    const r = await dialog.showOpenDialog({ filters: [{ name: 'Central Server backup', extensions: [`${EXT}.json`, 'json'] }], properties: ['openFile'] })
+    const r = await dialog.showOpenDialog({ filters: [{ name: 'ServerSysOps backup', extensions: [`${EXT}.json`, 'json'] }], properties: ['openFile'] })
     if (r.canceled || !r.filePaths[0]) return null
     const f = readBackup(r.filePaths[0])
     return { path: r.filePaths[0], version: f.version, createdAt: f.createdAt, encrypted: f.encrypted, counts: f.counts }

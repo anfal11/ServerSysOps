@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Central Server – manage Linux servers over SSH</title>
-  <meta name="description" content="Central Server is a free Windows desktop app that manages Linux servers over plain SSH: overview, terminal, files, Docker, web server, databases, firewall, users, cron, security audit and two-factor auth. Nothing to install on the server." />
-  <meta property="og:title" content="Central Server – manage Linux servers over SSH" />
+  <title>ServerSysOps – manage Linux servers over SSH</title>
+  <meta name="description" content="ServerSysOps is a free Windows desktop app that manages Linux servers over plain SSH: overview, terminal, files, Docker, web server, databases, firewall, users, cron, security audit and two-factor auth. Nothing to install on the server." />
+  <meta property="og:title" content="ServerSysOps – manage Linux servers over SSH" />
   <meta property="og:description" content="Free desktop app for managing Linux servers over SSH. Nothing to install on the server." />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
@@ -81,7 +81,7 @@
 <body>
   <header>
     <div class="wrap">
-      <a class="brand" href="#"><img src="logo.png" alt="" width="26" height="26" style="border-radius:6px" /> Central Server</a>
+      <a class="brand" href="#"><img src="logo.png" alt="" width="26" height="26" style="border-radius:6px" /> ServerSysOps</a>
       <nav>
         <a href="#features">Features</a>
         <a href="#install">Install</a>
@@ -94,11 +94,11 @@
     <h1>Manage your Linux servers<br />from one Windows app</h1>
     <p>Overview, terminal, files, Docker, Kubernetes, web server, databases, firewall, users, cron, security audit and two-factor auth. Everything works over plain SSH – nothing to install on the server.</p>
     <div class="cta">
-      <a class="btn primary" id="dl-setup" href="https://github.com/anfal11/CentralServer/releases/latest">
+      <a class="btn primary" id="dl-setup" href="https://github.com/anfal11/ServerSysOps/releases/latest">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Download for Windows
       </a>
-      <a class="btn" id="dl-portable" href="https://github.com/anfal11/CentralServer/releases/latest">Portable .exe (no install)</a>
+      <a class="btn" id="dl-portable" href="https://github.com/anfal11/ServerSysOps/releases/latest">Portable .exe (no install)</a>
     </div>
     <div class="meta" id="meta">Free to use · Windows 10/11 (64-bit)</div>
 
@@ -168,7 +168,7 @@
       <img src="creator.png" alt="" class="creator-photo" onerror="this.style.display='none'" />
       <div>
         <h2>Built by Anfal Ratul</h2>
-        <p class="lead" style="margin-bottom:14px">DevOps engineer. Central Server started as the tool I wanted for my own servers: everything over SSH, nothing to install, no cloud account. Questions, ideas or a bug? Message me on any of these.</p>
+        <p class="lead" style="margin-bottom:14px">DevOps engineer. ServerSysOps started as the tool I wanted for my own servers: everything over SSH, nothing to install, no cloud account. Questions, ideas or a bug? Message me on any of these.</p>
         <div class="socials">
           <a href="https://www.linkedin.com/in/anfal-ratul/" target="_blank" rel="noopener" title="LinkedIn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.45 20.45h-3.55v-5.57c0-1.33-.03-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.12 2.06 2.06 0 0 1 0 4.12zM7.12 20.45H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/></svg>LinkedIn</a>
           <a href="https://www.youtube.com/@anfalratul6540" target="_blank" rel="noopener" title="YouTube"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8zM9.6 15.6V8.4l6.2 3.6-6.2 3.6z"/></svg>YouTube</a>
@@ -180,13 +180,13 @@
   </section>
 
   <footer>
-    <div class="wrap">© <span id="year"></span> Anfal Ratul · Central Server is free to use · Not affiliated with any Linux distribution or Microsoft</div>
+    <div class="wrap">© <span id="year"></span> Anfal Ratul · ServerSysOps is free to use · Not affiliated with any Linux distribution or Microsoft</div>
   </footer>
 
   <script>
     document.getElementById('year').textContent = new Date().getFullYear()
     // Point the buttons at the newest release assets (falls back to the releases page).
-    fetch('https://api.github.com/repos/anfal11/CentralServer/releases/latest')
+    fetch('https://api.github.com/repos/anfal11/ServerSysOps/releases/latest')
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((rel) => {
         const assets = rel.assets || []

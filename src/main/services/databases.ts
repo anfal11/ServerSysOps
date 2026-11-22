@@ -1901,7 +1901,7 @@ export function register(ctx: Ctx): void {
     } else if (engine === 'mongo') {
       const name = assertMongoName(nameRaw, 'database name')
       // MongoDB creates databases lazily; create a placeholder collection so it shows up.
-      await mongoEval(ssh, serverId, `var d = db.getSiblingDB(${JSON.stringify(name)}); d.createCollection('_centralserver_init'); d.getSiblingDB(${JSON.stringify(name)}).getCollection('_centralserver_init').drop(); d.createCollection('default'); print('__SM__' + JSON.stringify({ ok: 1 }));`)
+      await mongoEval(ssh, serverId, `var d = db.getSiblingDB(${JSON.stringify(name)}); d.createCollection('_serversysops_init'); d.getSiblingDB(${JSON.stringify(name)}).getCollection('_serversysops_init').drop(); d.createCollection('default'); print('__SM__' + JSON.stringify({ ok: 1 }));`)
     } else if (engine === 'mssql') {
       const name = assertIdent(nameRaw, 'database name')
       const coll = opts?.collation ? ` COLLATE ${assertIdent(opts.collation, 'collation')}` : ''
@@ -2441,7 +2441,7 @@ DROP LOGIN ${qBr(u)};`
     }
     const additions = [...pending.entries()].filter(([, v]) => v !== null)
     if (additions.length) {
-      out.push('', `# Added by Central Server ${new Date().toISOString().slice(0, 19).replace('T', ' ')}`)
+      out.push('', `# Added by ServerSysOps ${new Date().toISOString().slice(0, 19).replace('T', ' ')}`)
       for (const [k, v] of additions) out.push(`${k} ${v}`)
     }
     const content = out.join('\n') + '\n'

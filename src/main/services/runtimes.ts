@@ -26,10 +26,10 @@ import { PHP_SETTING_KEYS } from '@shared/modules/runtimes'
 /* Constants                                                           */
 /* ------------------------------------------------------------------ */
 
-const NODE_ROOT = '/opt/centralserver/node'
-const BUN_ROOT = '/opt/centralserver/bun'
-const GO_ROOT = '/opt/centralserver/go'
-const SHIM_MARK = 'Central Server node shim'
+const NODE_ROOT = '/opt/serversysops/node'
+const BUN_ROOT = '/opt/serversysops/bun'
+const GO_ROOT = '/opt/serversysops/go'
+const SHIM_MARK = 'ServerSysOps node shim'
 const NVM_FALLBACK = 'v0.40.3'
 const DL_TIMEOUT = 1800000
 
@@ -222,9 +222,9 @@ async function verifyUser(ssh: SshClient, user: string): Promise<LoginUser> {
 
 function nodeShim(): string {
   return `#!/bin/sh
-# ${SHIM_MARK} - managed by Central Server, do not edit.
+# ${SHIM_MARK} - managed by ServerSysOps, do not edit.
 # Runs the Node.js version a project asks for in .nvmrc or .node-version (in the
-# current folder or above), or in $CENTRALSERVER_NODE_VERSION, or the default version
+# current folder or above), or in $SERVERSYSOPS_NODE_VERSION, or the default version
 # from ${NODE_ROOT}/default. Global npm packages live in /usr/local.
 ROOT=${NODE_ROOT}
 name=$(basename "$0")
@@ -242,9 +242,9 @@ while [ -n "$dir" ]; do
   [ "$dir" = "/" ] && break
   dir=$(dirname "$dir")
 done
-if [ -z "$want" ] && [ -n "$CENTRALSERVER_NODE_VERSION" ]; then
-  want="$CENTRALSERVER_NODE_VERSION"
-  src="CENTRALSERVER_NODE_VERSION"
+if [ -z "$want" ] && [ -n "$SERVERSYSOPS_NODE_VERSION" ]; then
+  want="$SERVERSYSOPS_NODE_VERSION"
+  src="SERVERSYSOPS_NODE_VERSION"
 fi
 want=$(printf %s "$want" | sed 's/^v//')
 case "$want" in
@@ -254,7 +254,7 @@ installed() { ls -1 "$ROOT" 2>/dev/null | grep -E '^[0-9]+(\\.[0-9]+)*$' | sort 
 ver=""
 if [ -n "$want" ]; then
   case "$want" in
-    *[!0-9.]*) echo "centralserver: invalid Node.js version '$want' requested by $src" >&2; exit 127 ;;
+    *[!0-9.]*) echo "serversysops: invalid Node.js version '$want' requested by $src" >&2; exit 127 ;;
   esac
   if [ -x "$ROOT/$want/bin/node" ]; then
     ver="$want"
@@ -263,21 +263,21 @@ if [ -n "$want" ]; then
     ver=$(installed | grep -E "^$pat(\\.[0-9]+)*$" | tail -n1)
   fi
   if [ -z "$ver" ]; then
-    echo "centralserver: Node.js $want (requested by $src) is not installed. Installed versions: $(installed | tr '\\n' ' ')" >&2
-    echo "centralserver: install it in Central Server > Runtimes > Node.js, or change $src." >&2
+    echo "serversysops: Node.js $want (requested by $src) is not installed. Installed versions: $(installed | tr '\\n' ' ')" >&2
+    echo "serversysops: install it in ServerSysOps > Runtimes > Node.js, or change $src." >&2
     exit 127
   fi
 else
   ver=$(basename "$(readlink "$ROOT/default" 2>/dev/null)" 2>/dev/null)
   if [ -z "$ver" ] || [ ! -x "$ROOT/$ver/bin/node" ]; then
-    echo "centralserver: no default Node.js version is set. Installed versions: $(installed | tr '\\n' ' ')" >&2
-    echo "centralserver: pick a default in Central Server > Runtimes > Node.js, or set CENTRALSERVER_NODE_VERSION." >&2
+    echo "serversysops: no default Node.js version is set. Installed versions: $(installed | tr '\\n' ' ')" >&2
+    echo "serversysops: pick a default in ServerSysOps > Runtimes > Node.js, or set SERVERSYSOPS_NODE_VERSION." >&2
     exit 127
   fi
 fi
 bin="$ROOT/$ver/bin/$name"
 if [ ! -x "$bin" ]; then
-  echo "centralserver: $name is not part of Node.js $ver" >&2
+  echo "serversysops: $name is not part of Node.js $ver" >&2
   exit 127
 fi
 case "$name" in
@@ -290,7 +290,7 @@ exec "$bin" "$@"
 async function installNodeShim(ssh: SshClient, h?: TaskHandle): Promise<void> {
   h?.log('Installing node/npm/npx/corepack shim in /usr/local/bin…')
   // Move aside any real binaries we would otherwise overwrite.
-  const pre = `mkdir -p /usr/local/bin; for n in node npm npx corepack; do p=/usr/local/bin/$n; if [ -e "$p" ] && ! grep -q ${shq(SHIM_MARK)} "$p" 2>/dev/null; then if [ -L "$p" ]; then t=$(readlink "$p"); case "$t" in node|/usr/local/bin/node) continue;; esac; fi; mv -f "$p" "$p.pre-centralserver" && echo "moved $p to $p.pre-centralserver"; fi; done`
+  const pre = `mkdir -p /usr/local/bin; for n in node npm npx corepack; do p=/usr/local/bin/$n; if [ -e "$p" ] && ! grep -q ${shq(SHIM_MARK)} "$p" 2>/dev/null; then if [ -L "$p" ]; then t=$(readlink "$p"); case "$t" in node|/usr/local/bin/node) continue;; esac; fi; mv -f "$p" "$p.pre-serversysops" && echo "moved $p to $p.pre-serversysops"; fi; done`
   const moved = await ssh.sudoRun(pre)
   if (moved.trim() && h) h.log(moved.trim())
   await writeRootFile(ssh, '/usr/local/bin/node', nodeShim(), '755')
@@ -355,7 +355,7 @@ echo __OTHERS
 for p in /usr/bin/node /usr/local/bin/node /snap/bin/node /usr/local/node/bin/node /opt/node/bin/node /usr/bin/nodejs; do
   [ -x "$p" ] || continue
   grep -q ${shq(SHIM_MARK)} "$p" 2>/dev/null && continue
-  rp=$(readlink -f "$p" 2>/dev/null); case "$rp" in /opt/centralserver/*) continue;; esac
+  rp=$(readlink -f "$p" 2>/dev/null); case "$rp" in /opt/serversysops/*) continue;; esac
   echo "$p $("$p" --version 2>/dev/null | head -n1)"
 done
 echo __GLOBALS
@@ -434,7 +434,7 @@ function registerNode(ctx: Ctx): void {
       await ensureTools(ssh, h, ['curl', 'tar', 'xz'])
       const file = `node-v${v}-linux-${arch}.tar.xz`
       const base = `https://nodejs.org/dist/v${v}`
-      const tmp = `/tmp/centralserver-node-${v}`
+      const tmp = `/tmp/serversysops-node-${v}`
       h.log(`Downloading ${base}/${file}…`)
       await ssh.sudoRun(`rm -rf ${tmp} && mkdir -p ${tmp} ${NODE_ROOT} && cd ${tmp} && curl -fSL --retry 3 -o ${file} ${base}/${file} && curl -fsSL --retry 3 -o SHASUMS256.txt ${base}/SHASUMS256.txt`, stream(h))
       h.log('Verifying SHA-256 checksum…')
@@ -537,7 +537,7 @@ echo __SYS
 echo __LINK
 readlink -f /usr/local/bin/bun 2>/dev/null
 echo __OTHERS
-for p in /usr/bin/bun /usr/local/bin/bun /snap/bin/bun; do [ -x "$p" ] || continue; rp=$(readlink -f "$p" 2>/dev/null); case "$rp" in /opt/centralserver/*) continue;; esac; echo "$p $("$p" --version 2>/dev/null | head -n1)"; done
+for p in /usr/bin/bun /usr/local/bin/bun /snap/bin/bun; do [ -x "$p" ] || continue; rp=$(readlink -f "$p" 2>/dev/null); case "$rp" in /opt/serversysops/*) continue;; esac; echo "$p $("$p" --version 2>/dev/null | head -n1)"; done
 echo __USERS
 ${USERS_AWK} | while IFS=: read -r u hm sh; do [ -x "$hm/.bun/bin/bun" ] && echo "$u $hm/.bun/bin/bun"; done
 echo __END`
@@ -608,13 +608,13 @@ interface GoDlEntry {
   files?: { filename: string; os: string; arch: string; sha256: string; kind: string }[]
 }
 
-const GO_PROFILE = `# Managed by Central Server - adds the default Go toolchain to PATH\ncase ":$PATH:" in\n  *:/usr/local/go/bin:*) ;;\n  *) export PATH="$PATH:/usr/local/go/bin" ;;\nesac\n`
+const GO_PROFILE = `# Managed by ServerSysOps - adds the default Go toolchain to PATH\ncase ":$PATH:" in\n  *:/usr/local/go/bin:*) ;;\n  *) export PATH="$PATH:/usr/local/go/bin" ;;\nesac\n`
 
 async function goSetDefaultCmd(ssh: SshClient, v: string): Promise<void> {
   await ssh.sudoRun(
-    `[ -x ${GO_ROOT}/${v}/bin/go ] || { echo "Go ${v} is not installed" >&2; exit 1; }; if [ -e /usr/local/go ] && [ ! -L /usr/local/go ]; then echo "/usr/local/go exists and is not managed by Central Server. Move it away first (e.g. mv /usr/local/go /usr/local/go.old)." >&2; exit 1; fi; ln -sfn ${GO_ROOT}/${v} /usr/local/go && ln -sfn /usr/local/go/bin/go /usr/local/bin/go && ln -sfn /usr/local/go/bin/gofmt /usr/local/bin/gofmt`
+    `[ -x ${GO_ROOT}/${v}/bin/go ] || { echo "Go ${v} is not installed" >&2; exit 1; }; if [ -e /usr/local/go ] && [ ! -L /usr/local/go ]; then echo "/usr/local/go exists and is not managed by ServerSysOps. Move it away first (e.g. mv /usr/local/go /usr/local/go.old)." >&2; exit 1; fi; ln -sfn ${GO_ROOT}/${v} /usr/local/go && ln -sfn /usr/local/go/bin/go /usr/local/bin/go && ln -sfn /usr/local/go/bin/gofmt /usr/local/bin/gofmt`
   )
-  await writeRootFile(ssh, '/etc/profile.d/centralserver-go.sh', GO_PROFILE)
+  await writeRootFile(ssh, '/etc/profile.d/serversysops-go.sh', GO_PROFILE)
 }
 
 function registerGo(ctx: Ctx): void {
@@ -635,9 +635,9 @@ echo __DEFAULT
 echo __ISDIR
 [ -e /usr/local/go ] && [ ! -L /usr/local/go ] && echo yes
 echo __OTHERS
-for p in /usr/local/go/bin/go /usr/bin/go /snap/bin/go /usr/lib/go/bin/go /usr/lib/golang/bin/go; do [ -x "$p" ] || continue; rp=$(readlink -f "$p" 2>/dev/null); case "$rp" in /opt/centralserver/*) continue;; esac; echo "$p $("$p" version 2>/dev/null | head -n1)"; done
+for p in /usr/local/go/bin/go /usr/bin/go /snap/bin/go /usr/lib/go/bin/go /usr/lib/golang/bin/go; do [ -x "$p" ] || continue; rp=$(readlink -f "$p" 2>/dev/null); case "$rp" in /opt/serversysops/*) continue;; esac; echo "$p $("$p" version 2>/dev/null | head -n1)"; done
 echo __PROFILE
-[ -f /etc/profile.d/centralserver-go.sh ] && echo yes
+[ -f /etc/profile.d/serversysops-go.sh ] && echo yes
 echo __CURL
 command -v curl >/dev/null 2>&1 && echo yes
 echo __END`
@@ -699,7 +699,7 @@ echo __END`
         if (r.code === 0 && /^[0-9a-f]{64}$/.test(t)) sha = t
       }
       if (!sha) throw new Error(`Could not obtain the SHA-256 checksum for ${file} from go.dev`)
-      const tmp = `/tmp/centralserver-go-${v}`
+      const tmp = `/tmp/serversysops-go-${v}`
       h.log(`Downloading https://go.dev/dl/${file}…`)
       await ssh.sudoRun(`rm -rf ${tmp} && mkdir -p ${tmp} ${GO_ROOT} && cd ${tmp} && curl -fSL --retry 3 -o ${file} https://go.dev/dl/${file}`, stream(h))
       h.log('Verifying SHA-256 checksum…')
@@ -729,7 +729,7 @@ echo __END`
     const v = assertGoVersion(versionRaw)
     const ssh = ctx.ssh(serverId)
     await ssh.sudoRun(
-      `[ -d ${GO_ROOT}/${v} ] || { echo "Go ${v} is not installed" >&2; exit 1; }; rm -rf ${GO_ROOT}/${v}; if [ -L /usr/local/go ] && [ "$(readlink -f /usr/local/go)" = ${shq(`${GO_ROOT}/${v}`)} ]; then rm -f /usr/local/go; n=$(ls -1 ${GO_ROOT} 2>/dev/null | grep -E '^[0-9]+\\.[0-9]+(\\.[0-9]+)?$' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n1); if [ -n "$n" ]; then ln -sfn ${GO_ROOT}/$n /usr/local/go; else for b in go gofmt; do t=$(readlink /usr/local/bin/$b 2>/dev/null); case "$t" in /usr/local/go/*) rm -f /usr/local/bin/$b;; esac; done; rm -f /etc/profile.d/centralserver-go.sh; fi; fi`
+      `[ -d ${GO_ROOT}/${v} ] || { echo "Go ${v} is not installed" >&2; exit 1; }; rm -rf ${GO_ROOT}/${v}; if [ -L /usr/local/go ] && [ "$(readlink -f /usr/local/go)" = ${shq(`${GO_ROOT}/${v}`)} ]; then rm -f /usr/local/go; n=$(ls -1 ${GO_ROOT} 2>/dev/null | grep -E '^[0-9]+\\.[0-9]+(\\.[0-9]+)?$' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n1); if [ -n "$n" ]; then ln -sfn ${GO_ROOT}/$n /usr/local/go; else for b in go gofmt; do t=$(readlink /usr/local/bin/$b 2>/dev/null); case "$t" in /usr/local/go/*) rm -f /usr/local/bin/$b;; esac; done; rm -f /etc/profile.d/serversysops-go.sh; fi; fi`
     )
     ctx.audit(serverId, 'runtimes.go.remove', v)
   })
@@ -899,7 +899,7 @@ async function phpEnsureRepo(ssh: SshClient, h: TaskHandle, family: PhpStatus['f
       h.log('Adding the packages.sury.org PHP repository…')
       await runPkg(ssh, installCmd(ssh, ['apt-transport-https', 'ca-certificates', 'curl', 'lsb-release']), stream(h))
       await ssh.sudoRun(
-        `curl -fsSLo /usr/share/keyrings/deb.sury.org-php.gpg https://packages.sury.org/php/apt.gpg && echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/centralserver-php.list`,
+        `curl -fsSLo /usr/share/keyrings/deb.sury.org-php.gpg https://packages.sury.org/php/apt.gpg && echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/serversysops-php.list`,
         stream(h, 120000)
       )
     }
@@ -1067,9 +1067,9 @@ function registerPhp(ctx: Ctx): void {
       .join('; ')
     const fpmBin = phpFpmBinary(family, v)
     const unit = phpFpmUnit(family, v)
-    const script = `set -e; for f in ${files.map(shq).join(' ')}; do [ -f "$f" ] || { echo "$f not found" >&2; exit 1; }; cp -f "$f" "$f.centralserver.bak"; ${sedParts}; echo "updated $f"; done
+    const script = `set -e; for f in ${files.map(shq).join(' ')}; do [ -f "$f" ] || { echo "$f not found" >&2; exit 1; }; cp -f "$f" "$f.serversysops.bak"; ${sedParts}; echo "updated $f"; done
 if ${files.includes(ini.fpm) ? 'true' : 'false'} && command -v ${fpmBin} >/dev/null 2>&1; then
-  if ! ${fpmBin} -t 2>&1; then for f in ${files.map(shq).join(' ')}; do cp -f "$f.centralserver.bak" "$f"; done; echo "php-fpm config test failed; restored backups" >&2; exit 1; fi
+  if ! ${fpmBin} -t 2>&1; then for f in ${files.map(shq).join(' ')}; do cp -f "$f.serversysops.bak" "$f"; done; echo "php-fpm config test failed; restored backups" >&2; exit 1; fi
   if systemctl cat ${unit} >/dev/null 2>&1; then systemctl restart ${unit} || { echo "restart of ${unit} failed" >&2; exit 1; }; echo "restarted ${unit}"; fi
 fi
 true`

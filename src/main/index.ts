@@ -78,7 +78,18 @@ app.whenReady().then(() => {
   if (legacyMigration.action !== 'none') console.log('[legacy data]', legacyMigration.action, legacyMigration.detail ?? '')
   repairShortcuts()
   nativeTheme.themeSource = 'dark'
-  Menu.setApplicationMenu(null)
+  // Windows/Linux: no menu bar. macOS: the standard app/Edit/View/Window menus, because without them
+  // Cmd+C/V/X/A/Z, Cmd+Q, Cmd+W and Cmd+H do nothing at all.
+  if (process.platform === 'darwin') {
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        { role: 'appMenu' },
+        { role: 'editMenu' },
+        { label: 'View', submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
+        { role: 'windowMenu' }
+      ])
+    )
+  } else Menu.setApplicationMenu(null)
 
   const ctx = createContext()
   for (const svc of [servers, terminal, overview, quickactions, files, docker, kubernetes, webserver, databases, runtimes, cron, processes, users, firewall, twofactor, security, logs, snippets, alerts, tunnels, backup, pkgupdates, traffic]) {

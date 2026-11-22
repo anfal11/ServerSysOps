@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ServerSysOps – manage Linux servers over SSH</title>
-  <meta name="description" content="ServerSysOps is a free Windows desktop app that manages Linux servers over plain SSH: overview, terminal, files, Docker, web server, databases, firewall, users, cron, security audit and two-factor auth. Nothing to install on the server." />
+  <meta name="description" content="ServerSysOps is a free Windows and macOS desktop app that manages Linux servers over plain SSH: overview, terminal, files, Docker, web server, databases, firewall, users, cron, security audit and two-factor auth. Nothing to install on the server." />
   <meta property="og:title" content="ServerSysOps – manage Linux servers over SSH" />
   <meta property="og:description" content="Free desktop app for managing Linux servers over SSH. Nothing to install on the server." />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
@@ -91,7 +91,7 @@
   </header>
 
   <div class="wrap hero">
-    <h1>Manage your Linux servers<br />from one Windows app</h1>
+    <h1>Manage your Linux servers<br />from one desktop app</h1>
     <p>Overview, terminal, files, Docker, Kubernetes, web server, databases, firewall, users, cron, security audit and two-factor auth. Everything works over plain SSH – nothing to install on the server.</p>
     <div class="cta">
       <a class="btn primary" id="dl-setup" href="https://github.com/anfal11/ServerSysOps/releases/latest">
@@ -99,8 +99,10 @@
         Download for Windows
       </a>
       <a class="btn" id="dl-portable" href="https://github.com/anfal11/ServerSysOps/releases/latest">Portable .exe (no install)</a>
+      <a class="btn" id="dl-mac-arm" href="https://github.com/anfal11/ServerSysOps/releases/latest" hidden>Mac · Apple Silicon</a>
+      <a class="btn" id="dl-mac-x64" href="https://github.com/anfal11/ServerSysOps/releases/latest" hidden>Mac · Intel</a>
     </div>
-    <div class="meta" id="meta">Free to use · Windows 10/11 (64-bit)</div>
+    <div class="meta" id="meta">Free to use · Windows 10/11 (64-bit) · macOS 11+</div>
 
     <div class="shot" aria-hidden="true">
       <div class="bar"><span></span><span></span><span></span></div>
@@ -159,6 +161,7 @@
         <div class="card"><h3>Connect</h3><p>Open the Overview and manage the server. Risky changes are tested and rolled back automatically.</p></div>
       </div>
       <div class="note" style="margin-top:18px">
+        <b>macOS:</b> the app is not notarized yet. If macOS says it cannot be opened, right-click the app → <b>Open</b>, or go to System Settings → Privacy &amp; Security and click <b>Open Anyway</b>. Updates on Mac are a manual download from the same page.<br />
         <b>Windows SmartScreen:</b> the app is not yet code-signed, so Windows may show "Windows protected your PC" on first run. Click <b>More info → Run anyway</b>. You can verify the SHA-256 of the file on the download page.
       </div>
     </div>
@@ -194,6 +197,8 @@
         const find = (re) => assets.find((a) => re.test(a.name))
         const setup = find(/setup\.exe$/i)
         const portable = find(/portable\.exe$/i)
+        const macArm = find(/mac-arm64\.dmg$/i)
+        const macX64 = find(/mac-x64\.dmg$/i)
         const mb = (a) => (a.size / 1048576).toFixed(0) + ' MB'
         if (setup) {
           document.getElementById('dl-setup').href = setup.browser_download_url
@@ -203,6 +208,13 @@
           const p = document.getElementById('dl-portable')
           p.href = portable.browser_download_url
           p.textContent = 'Portable .exe (no install) · ' + mb(portable)
+        }
+        for (const [id, a, label] of [['dl-mac-arm', macArm, 'Mac · Apple Silicon'], ['dl-mac-x64', macX64, 'Mac · Intel']]) {
+          if (!a) continue
+          const el = document.getElementById(id)
+          el.href = a.browser_download_url
+          el.textContent = label + ' · ' + mb(a)
+          el.hidden = false
         }
         document.getElementById('meta').insertAdjacentHTML('afterbegin', 'Version <code>' + rel.tag_name.replace(/^v/, '') + '</code> · released ' + new Date(rel.published_at).toLocaleDateString() + ' · ')
       })

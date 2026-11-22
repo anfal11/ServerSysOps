@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 - 2026-11-22
+
+### New
+- **macOS app** (Apple Silicon and Intel), built by GitHub Actions on every version tag together with the Windows packages. Standard macOS menus so Cmd+C/V/X/A/Z, Cmd+Q and Cmd+W work; the tab bar leaves room for the window buttons; terminal search is Cmd+F and Ctrl keeps its terminal meaning. The app is not notarized yet: allow it once via right-click → Open or Privacy & Security → Open Anyway. The update banner on Mac opens the download page (in-app install needs a signed app).
+- Releases are now built by CI into a draft GitHub release; publishing the draft is the only manual step.
+
 ## 0.4.2 - 2026-11-22
 
 ### Fixed

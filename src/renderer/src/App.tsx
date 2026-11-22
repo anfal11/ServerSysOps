@@ -85,12 +85,12 @@ export default function App(): React.JSX.Element {
 }
 
 function TabBar(): React.JSX.Element {
-  const { tabs, activeTab, setActiveTab, closeTab, servers, connections, tasks, toggleTasks, alerts } = useApp()
+  const { tabs, activeTab, setActiveTab, closeTab, servers, connections, tasks, toggleTasks, alerts, platform } = useApp()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const running = tasks.filter((t) => t.status === 'running').length
   const unack = alerts.filter((a) => !a.acknowledged).length
   return (
-    <div className="h-10 bg-bg-2 border-b border-border flex items-stretch shrink-0 drag">
+    <div className={cls('h-10 bg-bg-2 border-b border-border flex items-stretch shrink-0 drag', platform === 'darwin' && 'pl-[78px]')}>
       <div className="flex items-stretch no-drag overflow-x-auto">
         <button onClick={() => setActiveTab('home')} className={cls('px-3 flex items-center gap-2 border-r border-border text-muted hover:text-text border-t-2', activeTab === 'home' ? 'bg-bg text-text border-t-accent' : 'border-t-transparent')} title="Servers">
           <Home size={15} />
@@ -153,8 +153,8 @@ function UpdateButton(): React.JSX.Element | null {
         variant="primary"
         size="sm"
         icon={<Download size={13} />}
-        title={`Download version ${update.version}`}
-        onClick={() => api.global('update:download').catch((e) => toast({ kind: 'error', title: 'Download failed', detail: errMsg(e) }))}
+        title={update.manual ? `Open the download page for version ${update.version}` : `Download version ${update.version}`}
+        onClick={() => (update.manual ? api.openExternal('https://github.com/anfal11/ServerSysOps/releases/latest') : api.global('update:download').catch((e) => toast({ kind: 'error', title: 'Download failed', detail: errMsg(e) })))}
       >
         Update to {update.version}
       </Button>

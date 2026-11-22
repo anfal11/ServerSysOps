@@ -31,9 +31,28 @@ nsis:
   perMachine: false
   createDesktopShortcut: true
   shortcutName: ServerSysOps
+# Built on GitHub's macOS runners by .github/workflows/release.yml (macOS packages cannot be produced on
+# Windows). No Apple Developer ID yet: electron-builder skips signing (identity: null) and build/afterPack.js
+# re-signs the bundle ad hoc so Gatekeeper shows "unidentified developer" rather than "damaged".
 mac:
   category: public.app-category.developer-tools
-  target: [dmg]
+  icon: build/icon@1024.png
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+  artifactName: ServerSysOps_${version}_mac-${arch}.${ext}
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  darkModeSupport: true
+dmg:
+  title: ServerSysOps ${version}
+  contents:
+    - { x: 140, y: 190 }
+    - { x: 420, y: 190, type: link, path: /Applications }
+afterPack: build/afterPack.js
 linux:
   target: [AppImage, deb, rpm]
   category: Development
@@ -45,4 +64,6 @@ publish:
   provider: github
   owner: anfal11
   repo: ServerSysOps
+  # CI uploads into a draft release for the tag; publishing it (with notes) is the manual step.
+  releaseType: draft
 npmRebuild: false

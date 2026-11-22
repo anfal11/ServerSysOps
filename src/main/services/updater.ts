@@ -16,7 +16,9 @@ export function register(ctx: Ctx): void {
     autoUpdater.logger = null
     autoUpdater.on('checking-for-update', () => ctx.emit({ type: 'update', status: 'checking' }))
     autoUpdater.on('update-available', (info) => {
-      ctx.emit({ type: 'update', status: 'available', info })
+      // electron-updater can only install signed apps on macOS; the macOS build is unsigned (no Apple
+      // Developer ID), so there the banner opens the download page instead of downloading in-app.
+      ctx.emit({ type: 'update', status: 'available', info, manual: process.platform === 'darwin' })
       try {
         if (Notification.isSupported()) new Notification({ title: `ServerSysOps ${info.version} is available`, body: 'Open the app and click "Update" in the top bar to install it.', icon: appIcon() }).show()
       } catch {

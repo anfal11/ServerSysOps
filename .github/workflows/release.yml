@@ -1,0 +1,61 @@
+# Builds the Windows and macOS packages for a version tag and attaches them to a DRAFT GitHub release
+# named after the tag. Publishing the draft (adding the notes from CHANGELOG.md) is the manual step; the
+# website and the in-app updater pick the release up once it is published.
+#
+# Trigger: `git push origin vX.Y.Z` (or run it by hand from the Actions tab).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            args: --win
+          - name: macOS (Intel + Apple Silicon)
+            os: macos-latest
+            args: --mac --x64 --arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer and main
+        run: npm run build
+
+      - name: Package and upload to the draft release
+        run: npx electron-builder ${{ matrix.args }} --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No certificates: never try to look one up (macOS) or sign (Windows).
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Keep the packages as workflow artifacts too
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/*.dmg
+            release/*.zip
+            release/*.yml
+          if-no-files-found: error

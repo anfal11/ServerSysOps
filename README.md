@@ -32,9 +32,9 @@ Inspired by Serverias, rebuilt from scratch and extended.
 
 Also: background tasks with live output, automatic reconnection after drops or sleep, host-key change warnings, jump hosts (bastions), server groups and colours, encrypted backup & restore of all servers, secrets, settings and snippets (Settings), one-click package updates for installed services (Web server, Runtimes, Docker, Databases), an in-app update banner when a new release is published, settings for metrics interval, terminal font, confirmations and alert thresholds, and **26 colour themes** (18 dark: Graphite, Slate Dark, Carbon, Midnight Blue, Tokyo Night, One Dark, Gruvbox, Dracula, Nord, Catppuccin Mocha, Rosé Pine, Solarized Dark, Deep Ocean, Forest, Ember, Aurora, Monochrome, High Contrast; 8 light: Light, GitHub Light, Paper, Solarized Light, Catppuccin Latte, Mint, Rosé Pine Dawn, Slate) that restyle the whole UI including the terminal.
 
-## Download and install (Windows)
+## Download and install
 
-Two ready-to-run files are produced in `release/` by `npm run dist`:
+Windows: two ready-to-run files are produced in `release/` by `npm run dist`:
 
 | File | Use |
 |---|---|
@@ -43,7 +43,9 @@ Two ready-to-run files are produced in `release/` by `npm run dist`:
 
 Official downloads live on [GitHub Releases](https://github.com/anfal11/ServerSysOps/releases); the landing page in `site/` (deployed on Vercel) links to the latest release automatically. Installed copies check GitHub Releases on start and offer updates in Settings.
 
-Publishing a new version: bump `version` in `package.json`, commit, tag `vX.Y.Z`, run `npm run dist`, then create a GitHub release for that tag and attach `ServerSysOps_X.Y.Z_x64-setup.exe`, `ServerSysOps_X.Y.Z_x64-setup.exe.blockmap`, `ServerSysOps_X.Y.Z_x64-portable.exe` and `latest.yml` from `release/`. The `latest.yml` file is what existing installs use to detect the update.
+macOS: `ServerSysOps_<version>_mac-arm64.dmg` (Apple Silicon) and `ServerSysOps_<version>_mac-x64.dmg` (Intel), built by the GitHub Actions workflow in `.github/workflows/release.yml` (macOS packages can only be built on macOS). The app is not notarized: on first launch right-click → Open, or allow it under System Settings → Privacy & Security. In-app updates are Windows-only; on Mac the update banner opens the download page.
+
+Publishing a new version: bump `version` in `package.json`, update `CHANGELOG.md`, commit, tag `vX.Y.Z` and push the tag. The Release workflow builds Windows and macOS packages and attaches them to a **draft** release for that tag; paste the changelog section into it and publish. (Manual alternative for Windows only: run `npm run dist` and attach `ServerSysOps_X.Y.Z_x64-setup.exe`, `ServerSysOps_X.Y.Z_x64-setup.exe.blockmap`, `ServerSysOps_X.Y.Z_x64-portable.exe` and `latest.yml` from `release/`. The `latest.yml` file is what existing installs use to detect the update.
 
 The build is not code-signed, so Windows SmartScreen shows "Windows protected your PC" the first time: click **More info → Run anyway**. To remove that warning, sign the exe with an Authenticode certificate (set `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD` for electron-builder). macOS and Linux packages need to be built on those platforms (`npm run dist:mac`, `npm run dist:linux`).
 
@@ -57,7 +59,7 @@ The build is not code-signed, so Windows SmartScreen shows "Windows protected yo
 
 ## Requirements
 
-- Windows 10/11 (64-bit), macOS 10.15+, or Linux. The installer for Windows is produced by `npm run dist`.
+- Windows 10/11 (64-bit) or macOS 11+ (Intel and Apple Silicon). Linux builds are possible with `npm run dist:linux` but are not published.
 - Target servers: any Linux reachable by SSH (Ubuntu, Debian, RHEL, Rocky, Alma, Fedora, openSUSE, Alpine, Arch). Most modules need `sudo` or a root login. systemd is used where available; distros without it get reduced service features.
 
 ## Status and known limitations
@@ -66,7 +68,7 @@ The build is not code-signed, so Windows SmartScreen shows "Windows protected yo
 - Busybox-only systems (Alpine) lack GNU `find -printf`; the Files module falls back to SFTP metadata there, but search is limited.
 - Web server site management is read-only for OpenLiteSpeed and Lighttpd; Caddy sites are summarised from the Caddyfile.
 - Reverse (remote → local) SSH tunnels and a local terminal are not included yet.
-- The app is unsigned; Windows SmartScreen will warn on first launch of the installer.
+- The app is unsigned; Windows SmartScreen warns on first launch of the installer, and macOS asks to allow an app from an unidentified developer.
 
 ## Development
 
@@ -75,7 +77,7 @@ npm install            # installs dependencies and downloads Electron
 npm run dev            # start with hot reload
 npm run typecheck      # tsc for main and renderer
 npm run build          # production bundle to out/
-npm run dist           # Windows NSIS installer to release/
+npm run dist           # Windows NSIS installer to release/ (macOS: npm run dist:mac, on a Mac)
 ```
 
 The environment variable `SERVERSYSOPS_DEBUG=1` forwards renderer console output to the terminal. For automated UI checks, launch `electron out/main/index.js --remote-debugging-port=9222`; the renderer exposes `window.__serversysops.useApp` (the zustand store) for scripted navigation.

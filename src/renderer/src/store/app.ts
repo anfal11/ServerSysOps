@@ -46,7 +46,9 @@ interface AppState {
   settings: AppSettings
   toasts: Toast[]
   appVersion: string
-  update: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'none' | 'error'; version?: string; percent?: number; error?: string }
+  update: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'none' | 'error'; version?: string; percent?: number; error?: string; manual?: boolean }
+  /** process.platform of the main process ('win32', 'darwin', 'linux'). */
+  platform: string
   /** Commands queued for the Terminal page (consumed when it mounts / is visible). */
   pendingTerminal: Record<string, string[]>
   /** Interactive SSH login prompts waiting for the user (2FA codes etc.). */
@@ -84,6 +86,7 @@ export const useApp = create<AppState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   toasts: [],
   appVersion: '',
+  platform: '',
   update: { status: 'idle' },
   pendingTerminal: {},
   authPrompts: [],
@@ -99,7 +102,7 @@ export const useApp = create<AppState>((set, get) => ({
     ])
     const connections: Record<string, ConnectionState> = {}
     for (const s of states) connections[s.serverId] = s
-    set({ servers, connections, tasks, settings, appVersion: info.version, alerts })
+    set({ servers, connections, tasks, settings, appVersion: info.version, platform: info.platform, alerts })
     applyTheme(settings.theme)
     api.onEvent((e) => {
       if (e.type === 'connection') {
@@ -124,8 +127,9 @@ export const useApp = create<AppState>((set, get) => ({
         const info = (e.info ?? {}) as { version?: string; percent?: number }
         const prev = get().update
         if (e.status === 'available') {
-          set({ update: { status: 'available', version: info.version } })
-          if (prev.version !== info.version) get().toast({ kind: 'info', title: `Version ${info.version} is available`, detail: 'Click "Update" in the top bar to download and install it.' })
+          const manual = !!(e as { manual?: boolean }).manual
+          set({ update: { status: 'available', version: info.version, manual } })
+          if (prev.version !== info.version) get().toast({ kind: 'info', title: `Version ${info.version} is available`, detail: manual ? 'Click "Update" in the top bar to open the download page.' : 'Click "Update" in the top bar to download and install it.' })
         } else if (e.status === 'downloading') set({ update: { status: 'downloading', version: prev.version, percent: Math.round(info.percent ?? 0) } })
         else if (e.status === 'downloaded') set({ update: { status: 'downloaded', version: prev.version } })
         else if (e.status === 'error') set({ update: { status: 'error', version: prev.version, error: String(e.info ?? 'Update failed') } })

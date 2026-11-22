@@ -11,6 +11,8 @@ import { Button, ContextMenu, Input } from '@/components/ui'
 import { cls } from '@/lib/format'
 import { terminalTheme } from '@/lib/themes'
 
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform)
+
 /* ------------------------------------------------------------------ */
 /* Persistent terminal registry (survives page switches)                */
 /* ------------------------------------------------------------------ */
@@ -119,6 +121,8 @@ function createTab(serverId: string, title?: string): TermTab {
     true
   )
   // Clipboard shortcuts: Ctrl+Shift+C / Ctrl+Shift+V, and Ctrl+C copies when there is a selection.
+  // macOS uses Cmd+C / Cmd+V, which the browser handles itself (xterm copies on the copy event and our
+  // paste listener above takes the paste event), so Ctrl keeps its terminal meaning there.
   term.attachCustomKeyEventHandler((ev) => {
     if (ev.type !== 'keydown') return true
     if (ev.ctrlKey && ev.shiftKey && ev.key.toLowerCase() === 'c') {
@@ -126,7 +130,7 @@ function createTab(serverId: string, title?: string): TermTab {
       if (sel) void navigator.clipboard.writeText(sel)
       return false
     }
-    const isPasteKey = (ev.ctrlKey && ev.key.toLowerCase() === 'v') || (ev.shiftKey && ev.key === 'Insert')
+    const isPasteKey = (!IS_MAC && ev.ctrlKey && ev.key.toLowerCase() === 'v') || (ev.shiftKey && ev.key === 'Insert')
     if (isPasteKey) {
       // preventDefault stops the browser's own "paste" event, which xterm also listens to; without
       // it the text arrived twice (once from us, once from xterm's native paste handler).
@@ -140,7 +144,7 @@ function createTab(serverId: string, title?: string): TermTab {
       if (sel) void navigator.clipboard.writeText(sel)
       return false
     }
-    if (ev.ctrlKey && !ev.shiftKey && ev.key.toLowerCase() === 'c' && term.hasSelection()) {
+    if (!IS_MAC && ev.ctrlKey && !ev.shiftKey && ev.key.toLowerCase() === 'c' && term.hasSelection()) {
       void navigator.clipboard.writeText(term.getSelection())
       term.clearSelection()
       return false
@@ -449,7 +453,7 @@ export default function Terminal({ serverId }: PageProps): React.JSX.Element {
       <div
         className="flex-1 min-h-0 relative bg-bg"
         onKeyDown={(e) => {
-          if (e.ctrlKey && e.key.toLowerCase() === 'f') {
+          if ((IS_MAC ? e.metaKey : e.ctrlKey) && e.key.toLowerCase() === 'f') {
             e.preventDefault()
             setSearchOpen(true)
           }

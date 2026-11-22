@@ -431,6 +431,6 @@ export type AppEvent =
   | { type: 'terminal:exit'; ptyId: string; code?: number }
   | { type: 'alert'; alert: AlertEvent }
   | { type: 'transfer'; id: string; name: string; direction: 'upload' | 'download'; done: number; total: number; status: 'running' | 'done' | 'failed'; error?: string }
-  | { type: 'update'; status: string; info?: unknown }
+  | { type: 'update'; status: string; info?: unknown; manual?: boolean }
   | { type: 'auth-prompt'; prompt: AuthPrompt }
   | { type: 'auth-prompt-done'; requestId: string }

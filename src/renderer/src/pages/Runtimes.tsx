@@ -4,6 +4,7 @@ import type { PageProps } from '@/pages'
 import { api } from '@/lib/api'
 import { Badge, Button, Callout, Card, EmptyState, ErrorBox, Field, Input, KV, Loading, Page, PageHeader, Select, Table, Tabs, Toggle, confirm, useAction, useAsync } from '@/components/ui'
 import { useApp } from '@/store/app'
+import { PackageUpdate } from '@/components/PackageUpdate'
 import type { BunStatus, GoStatus, NodeStatus, PhpFpmAction, PhpSettingKey, PhpSettings, PhpSettingsTarget, PhpStatus, PhpVersionInfo, PipxPackage, PythonStatus, PythonTool } from '@shared/modules/runtimes'
 
 type TabId = 'node' | 'bun' | 'go' | 'php' | 'python'
@@ -540,6 +541,11 @@ function GoTab({ serverId }: PageProps): React.JSX.Element {
 /* PHP                                                                 */
 /* ------------------------------------------------------------------ */
 
+/** Distro packages of one PHP version (Debian/Ubuntu: php8.3-cli, php8.3-fpm; RHEL family: php-cli, php-fpm). */
+function phpPackages(family: PhpStatus['family'], version: string): string[] {
+  return family === 'debian' ? [`php${version}-cli`, `php${version}-fpm`] : ['php-cli', 'php-fpm']
+}
+
 function PhpTab({ serverId }: PageProps): React.JSX.Element {
   const { data, error, loading, reload } = useAsync(() => api.call<PhpStatus>('rt:php:status', serverId), [serverId])
   const { run, busy } = useAction()
@@ -706,6 +712,9 @@ function PhpVersionCard({ serverId, status, v, reload, onRemove }: { serverId: s
           )}
           {v.fpmUnit ? v.fpmActive ? <Badge color="ok">FPM running</Badge> : <Badge color="danger">FPM stopped</Badge> : <Badge>no FPM</Badge>}
           {v.fpmUnit && !v.fpmEnabled && <Badge color="warn">not enabled at boot</Badge>}
+          {status.family !== 'other' && (
+            <PackageUpdate serverId={serverId} packages={phpPackages(status.family, v.version)} restart={v.fpmUnit ? [v.fpmUnit] : undefined} label={`PHP ${v.version}`} />
+          )}
         </span>
       }
       actions={
@@ -840,6 +849,14 @@ function PythonTab({ serverId }: PageProps): React.JSX.Element {
   }
   useReloadOnTaskDone(serverId, reloadAll)
   const [pkg, setPkg] = useState('')
+  const pm = useApp((s) => s.connections[serverId]?.os?.pkgManager)
+  // Distro package names of the tools (uv and pyenv are not package-managed and are skipped).
+  const pyPkg = (tool: PythonTool | 'python3'): string[] => {
+    if (tool === 'python3') return ['python3']
+    if (pm === 'apt') return tool === 'pip' ? ['python3-pip'] : tool === 'venv' ? ['python3-venv'] : tool === 'pipx' ? ['pipx'] : []
+    if (pm === 'dnf' || pm === 'yum') return tool === 'pip' ? ['python3-pip'] : tool === 'pipx' ? ['pipx'] : []
+    return []
+  }
 
   if (error) return <ErrorBox error={error} onRetry={reload} />
   if (loading || !data) return <Loading />
@@ -860,6 +877,7 @@ function PythonTab({ serverId }: PageProps): React.JSX.Element {
     <span className="flex items-center gap-3">
       {present ? <Badge color="ok">installed</Badge> : <Badge>missing</Badge>}
       <span className="font-mono text-muted text-xs">{detail}</span>
+      {present && which && pyPkg(which).length > 0 && <PackageUpdate serverId={serverId} packages={pyPkg(which)} label={label} />}
       {!present && which && (
         <Button size="xs" icon={<Download size={11} />} loading={starting} onClick={() => void installTool(which)} title={hint}>
           Install
@@ -887,7 +905,19 @@ function PythonTab({ serverId }: PageProps): React.JSX.Element {
         )}
         <KV
           rows={[
-            ['python3', data.python3 ? <span className="font-mono">{data.python3.version} <span className="text-muted">({data.python3.path})</span></span> : <Badge>missing</Badge>],
+            [
+              'python3',
+              data.python3 ? (
+                <span className="flex items-center gap-3">
+                  <span className="font-mono">
+                    {data.python3.version} <span className="text-muted">({data.python3.path})</span>
+                  </span>
+                  <PackageUpdate serverId={serverId} packages={pyPkg('python3')} label="python3" />
+                </span>
+              ) : (
+                <Badge>missing</Badge>
+              )
+            ],
             toolRow('pip', !!data.pip, data.pip?.version ?? '', 'pip', 'Install python3-pip'),
             toolRow('venv', data.venvAvailable, data.venvAvailable ? 'python3 -m venv' : '', 'venv', 'Install python3-venv'),
             toolRow('pipx', !!data.pipx, data.pipx ? `${data.pipx.version} (${data.pipx.path})` : '', 'pipx', 'Install pipx (isolated CLI tools)'),

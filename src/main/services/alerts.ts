@@ -1,5 +1,6 @@
 import { Notification } from 'electron'
 import type { Ctx } from '../core'
+import { appIcon } from '../branding'
 import type { AlertEvent, ConnectionState } from '@shared/types'
 import type { ServerSample } from '@shared/modules/alerts'
 import { ackAlerts, addAlert, clearAlerts, getSettings, listAlerts } from '../store/settings'
@@ -50,7 +51,7 @@ export function register(ctx: Ctx): void {
 
   const notify = (alert: AlertEvent): void => {
     try {
-      if (Notification.isSupported()) new Notification({ title: `${alert.serverName}: ${alert.kind === 'disconnect' ? 'connection lost' : alert.kind === 'reboot-required' ? 'reboot required' : `${alert.kind} alert`}`, body: alert.message, silent: false }).show()
+      if (Notification.isSupported()) new Notification({ title: `${alert.serverName}: ${alert.kind === 'disconnect' ? 'connection lost' : alert.kind === 'reboot-required' ? 'reboot required' : `${alert.kind} alert`}`, body: alert.message, silent: false, icon: appIcon() }).show()
     } catch {
       /* notifications unavailable */
     }

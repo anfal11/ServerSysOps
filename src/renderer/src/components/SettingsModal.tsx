@@ -5,7 +5,8 @@ import type { AppSettings } from '@shared/types'
 import { api } from '@/lib/api'
 import { THEMES, applyTheme } from '@/lib/themes'
 import { cls } from '@/lib/format'
-import { Check } from 'lucide-react'
+import { Check, Download, Upload } from 'lucide-react'
+import { errMsg } from '@/lib/api'
 
 export default function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }): React.JSX.Element {
   const settings = useApp((s) => s.settings)
@@ -110,6 +111,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
             </Field>
           </div>
         </div>
+        <BackupSection />
         <div className="col-span-2 border-t border-border pt-3 flex items-center gap-3">
           <Button
             onClick={async () => {
@@ -124,5 +126,97 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
         </div>
       </div>
     </Modal>
+  )
+}
+
+interface BackupInfo {
+  path: string
+  version: string
+  createdAt: number
+  encrypted: boolean
+  counts: { servers: number; snippets: number; secrets: number }
+}
+
+/** Export / import of servers (optionally with encrypted passwords and keys), settings and snippets. */
+function BackupSection(): React.JSX.Element {
+  const toast = useApp((s) => s.toast)
+  const [pass, setPass] = useState('')
+  const [withSecrets, setWithSecrets] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [pending, setPending] = useState<BackupInfo | null>(null)
+  const [importPass, setImportPass] = useState('')
+  const doExport = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const ok = await api.global<boolean>('backup:export', { passphrase: pass, includeSecrets: withSecrets })
+      if (ok) toast({ kind: 'success', title: 'Backup saved', detail: withSecrets ? 'Passwords and keys are encrypted with your passphrase.' : 'Saved without passwords or keys.' })
+    } catch (e) {
+      toast({ kind: 'error', title: 'Backup failed', detail: errMsg(e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const pick = async (): Promise<void> => {
+    try {
+      const info = await api.global<BackupInfo | null>('backup:inspect')
+      if (info) setPending(info)
+    } catch (e) {
+      toast({ kind: 'error', title: 'Cannot read backup', detail: errMsg(e) })
+    }
+  }
+  const doImport = async (): Promise<void> => {
+    if (!pending) return
+    setBusy(true)
+    try {
+      const r = await api.global<{ servers: number; secrets: number; snippets: number; settings: boolean }>('backup:import', { path: pending.path, passphrase: importPass })
+      toast({ kind: 'success', title: 'Backup restored', detail: `${r.servers} servers (${r.secrets} with passwords/keys), ${r.snippets} snippets. Reloading…` })
+      setPending(null)
+      setTimeout(() => window.location.reload(), 900)
+    } catch (e) {
+      toast({ kind: 'error', title: 'Restore failed', detail: errMsg(e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="col-span-2 border-t border-border pt-3">
+      <div className="text-xs font-semibold mb-1">Backup &amp; restore</div>
+      <div className="text-[11px] text-dim mb-3">One file with all servers, settings and snippets. With a passphrase the passwords, key passphrases, sudo passwords and 2FA secrets are included, encrypted (AES-256-GCM), so you can move to another PC.</div>
+      <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
+        <Field label={withSecrets ? 'Passphrase (min. 8 characters, needed to restore)' : 'Passphrase (optional)'}>
+          <Input type="password" value={pass} onChange={(e) => setPass(e.target.value)} autoComplete="new-password" placeholder={withSecrets ? 'Choose a strong passphrase' : 'Leave empty for an unencrypted file'} />
+        </Field>
+        <Button icon={<Download size={13} />} variant="primary" loading={busy} disabled={withSecrets && pass.trim().length < 8} onClick={doExport}>
+          Export backup
+        </Button>
+      </div>
+      <div className="flex items-center justify-between mt-2">
+        <Checkbox checked={withSecrets} onChange={setWithSecrets} label="Include passwords, keys and 2FA secrets (encrypted)" />
+        <Button icon={<Upload size={13} />} onClick={pick} disabled={busy}>
+          Restore from backup…
+        </Button>
+      </div>
+      {pending && (
+        <div className="mt-3 border border-border-2 rounded-md p-3 bg-bg-2 space-y-2">
+          <div className="text-xs">
+            <b>{pending.path.split(/[\\/]/).pop()}</b> · created {new Date(pending.createdAt).toLocaleString()} by version {pending.version} · {pending.counts.servers} servers, {pending.counts.snippets} snippets{pending.encrypted ? `, ${pending.counts.secrets} with secrets (encrypted)` : ' (no secrets)'}
+          </div>
+          {pending.encrypted && (
+            <Field label="Passphrase of this backup">
+              <Input type="password" value={importPass} onChange={(e) => setImportPass(e.target.value)} autoFocus autoComplete="off" />
+            </Field>
+          )}
+          <div className="text-[11px] text-warn-fg">Servers with the same id are updated, others are added; settings and snippets from the file replace the current ones. The app reloads afterwards.</div>
+          <div className="flex gap-2 justify-end">
+            <Button size="xs" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
+            <Button size="xs" variant="primary" loading={busy} disabled={pending.encrypted && !importPass} onClick={doImport}>
+              Restore
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

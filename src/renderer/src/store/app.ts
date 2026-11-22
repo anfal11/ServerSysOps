@@ -44,6 +44,7 @@ interface AppState {
   settings: AppSettings
   toasts: Toast[]
   appVersion: string
+  update: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'none' | 'error'; version?: string; percent?: number; error?: string }
   /** Commands queued for the Terminal page (consumed when it mounts / is visible). */
   pendingTerminal: Record<string, string[]>
   /** Interactive SSH login prompts waiting for the user (2FA codes etc.). */
@@ -81,6 +82,7 @@ export const useApp = create<AppState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   toasts: [],
   appVersion: '',
+  update: { status: 'idle' },
   pendingTerminal: {},
   authPrompts: [],
 
@@ -116,6 +118,17 @@ export const useApp = create<AppState>((set, get) => ({
         set((st) => ({ authPrompts: [...st.authPrompts.filter((p) => p.requestId !== e.prompt.requestId), e.prompt] }))
       } else if (e.type === 'auth-prompt-done') {
         set((st) => ({ authPrompts: st.authPrompts.filter((p) => p.requestId !== e.requestId) }))
+      } else if (e.type === 'update') {
+        const info = (e.info ?? {}) as { version?: string; percent?: number }
+        const prev = get().update
+        if (e.status === 'available') {
+          set({ update: { status: 'available', version: info.version } })
+          if (prev.version !== info.version) get().toast({ kind: 'info', title: `Version ${info.version} is available`, detail: 'Click "Update" in the top bar to download and install it.' })
+        } else if (e.status === 'downloading') set({ update: { status: 'downloading', version: prev.version, percent: Math.round(info.percent ?? 0) } })
+        else if (e.status === 'downloaded') set({ update: { status: 'downloaded', version: prev.version } })
+        else if (e.status === 'error') set({ update: { status: 'error', version: prev.version, error: String(e.info ?? 'Update failed') } })
+        else if (e.status === 'none') set({ update: { status: 'none' } })
+        else if (e.status === 'checking') set({ update: { ...prev, status: prev.status === 'idle' || prev.status === 'none' ? 'checking' : prev.status } })
       } else if (e.type === 'alert') {
         set((st) => ({ alerts: [e.alert, ...st.alerts].slice(0, 500) }))
         get().toast({ kind: 'warn', title: `${e.alert.serverName}: ${e.alert.message}` })

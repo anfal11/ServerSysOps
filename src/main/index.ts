@@ -21,7 +21,10 @@ import * as logs from './services/logs'
 import * as snippets from './services/snippets'
 import * as alerts from './services/alerts'
 import * as tunnels from './services/tunnels'
+import * as pkgupdates from './services/pkgupdates'
 import * as updater from './services/updater'
+import * as backup from './services/backup'
+import { APP_ID, APP_NAME, appIcon, migrateLegacyUserData } from './branding'
 
 const isDev = !app.isPackaged
 let mainWindow: BrowserWindow | null = null
@@ -33,8 +36,9 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 600,
     show: false,
-    backgroundColor: '#0f1115',
-    title: 'Central Server',
+    backgroundColor: '#1c1f26',
+    title: APP_NAME,
+    icon: appIcon(),
     autoHideMenuBar: true,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
@@ -63,12 +67,13 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  app.setAppUserModelId('com.centralserver.app')
+  app.setAppUserModelId(APP_ID)
+  migrateLegacyUserData()
   nativeTheme.themeSource = 'dark'
   Menu.setApplicationMenu(null)
 
   const ctx = createContext()
-  for (const svc of [servers, terminal, overview, quickactions, files, docker, webserver, databases, runtimes, cron, processes, users, firewall, twofactor, security, logs, snippets, alerts, tunnels]) {
+  for (const svc of [servers, terminal, overview, quickactions, files, docker, webserver, databases, runtimes, cron, processes, users, firewall, twofactor, security, logs, snippets, alerts, tunnels, backup, pkgupdates]) {
     svc.register(ctx)
   }
   updater.register(ctx)

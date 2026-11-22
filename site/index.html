@@ -8,6 +8,8 @@
   <meta property="og:title" content="Central Server – manage Linux servers over SSH" />
   <meta property="og:description" content="Free desktop app for managing Linux servers over SSH. Nothing to install on the server." />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <meta property="og:image" content="logo.png" />
   <style>
     :root {
       --bg: #1c1f26; --bg2: #21252d; --panel: #262a33; --panel2: #2d323c; --border: #363c47; --border2: #444b58;
@@ -73,10 +75,7 @@
 <body>
   <header>
     <div class="wrap">
-      <a class="brand" href="#">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#4f8ef7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg>
-        Central Server
-      </a>
+      <a class="brand" href="#"><img src="logo.png" alt="" width="26" height="26" style="border-radius:6px" /> Central Server</a>
       <nav>
         <a href="#features">Features</a>
         <a href="#install">Install</a>
@@ -129,10 +128,12 @@
         <div class="card"><h3>Files (SFTP)</h3><p>Browse, edit, upload, download, permissions, archives and a root-mode for system files.</p></div>
         <div class="card"><h3>Docker</h3><p>Containers, images, volumes, networks, logs, stats and Compose projects.</p></div>
         <div class="card"><h3>Web server</h3><p>Nginx / Apache sites, PHP, reverse proxies and free HTTPS certificates with Let's Encrypt.</p></div>
-        <div class="card"><h3>Databases</h3><p>MySQL / MariaDB, PostgreSQL, MongoDB, SQL Server and SQLite: install, users, backups, restore and a query editor.</p></div>
+        <div class="card"><h3>Databases</h3><p>MySQL / MariaDB, PostgreSQL, MongoDB, Redis, SQL Server and SQLite: install, users, backups, restore, key browser and a query editor.</p></div>
         <div class="card"><h3>Security audit</h3><p>Scored checks for SSH, firewall, updates, accounts, permissions, kernel hardening, with one-click fixes.</p></div>
         <div class="card"><h3>Two-factor auth</h3><p>Google Authenticator for SSH logins with QR enrolment, scratch codes and lock-out-safe enforcement.</p></div>
         <div class="card"><h3>Firewall, users, cron, processes</h3><p>ufw / firewalld rules, user and key management, cron jobs with timers, process control.</p></div>
+        <div class="card"><h3>One-click service updates</h3><p>See when nginx, Apache, PHP, Docker or a database has a newer package and update just that service, with a restart.</p></div>
+        <div class="card"><h3>Backup &amp; restore</h3><p>Export every server, setting and snippet to one file; passwords and keys are encrypted with your passphrase.</p></div>
         <div class="card"><h3>Logs, snippets, tunnels, alerts</h3><p>journalctl and log files, saved command snippets, SSH tunnels and resource alerts.</p></div>
         <div class="card"><h3>26 colour themes</h3><p>Soft dark, deep dark and light palettes including Tokyo Night, Nord, Dracula, Catppuccin and GitHub Light.</p></div>
         <div class="card"><h3>Runs on every distro</h3><p>Ubuntu, Debian, RHEL, Rocky, Alma, Fedora, openSUSE, Alpine and Arch, using apt, dnf, zypper, apk or pacman.</p></div>

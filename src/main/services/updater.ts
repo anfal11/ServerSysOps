@@ -1,4 +1,5 @@
-import { app } from 'electron'
+import { app, Notification } from 'electron'
+import { appIcon } from '../branding'
 import type { Ctx } from '../core'
 import { getSettings } from '../store/settings'
 
@@ -14,7 +15,14 @@ export function register(ctx: Ctx): void {
     autoUpdater.autoDownload = false
     autoUpdater.logger = null
     autoUpdater.on('checking-for-update', () => ctx.emit({ type: 'update', status: 'checking' }))
-    autoUpdater.on('update-available', (info) => ctx.emit({ type: 'update', status: 'available', info }))
+    autoUpdater.on('update-available', (info) => {
+      ctx.emit({ type: 'update', status: 'available', info })
+      try {
+        if (Notification.isSupported()) new Notification({ title: `Central Server ${info.version} is available`, body: 'Open the app and click "Update" in the top bar to install it.', icon: appIcon() }).show()
+      } catch {
+        /* ignore */
+      }
+    })
     autoUpdater.on('update-not-available', () => ctx.emit({ type: 'update', status: 'none' }))
     autoUpdater.on('download-progress', (p) => ctx.emit({ type: 'update', status: 'downloading', info: p }))
     autoUpdater.on('update-downloaded', () => ctx.emit({ type: 'update', status: 'downloaded' }))
@@ -41,7 +49,12 @@ export function register(ctx: Ctx): void {
     autoUpdater?.quitAndInstall()
   })
 
-  if (app.isPackaged && getSettings().checkForUpdates && autoUpdater) {
-    setTimeout(() => autoUpdater?.checkForUpdates().catch(() => {}), 8000)
+  if (app.isPackaged && autoUpdater) {
+    const check = (): void => {
+      if (getSettings().checkForUpdates) autoUpdater?.checkForUpdates().catch(() => {})
+    }
+    setTimeout(check, 8000)
+    // Long-running sessions still learn about new releases.
+    setInterval(check, 6 * 60 * 60 * 1000)
   }
 }

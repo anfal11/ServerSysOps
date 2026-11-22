@@ -23,11 +23,18 @@ import type {
   MongoDocsResult,
   MssqlInstallInput,
   MssqlSettings,
+  RedisClient,
+  RedisConfigPatch,
+  RedisInfo,
+  RedisKey,
+  RedisKeyValue,
+  RedisScanResult,
+  RedisSlowlogEntry,
   SqliteOpenResult
 } from '@shared/modules/databases'
-import { DB_BACKUPS_DIR, DB_EXPORT_MAX_BYTES, DB_IMPORT_MAX_BYTES, DB_ROWS_MAX_LIMIT, MSSQL_BACKUP_DIR, isStrongSqlPassword } from '@shared/modules/databases'
-import { assertAbsPath, b64Echo, shq } from '../ssh/shell'
-import { installCmd, pkgEnv, runPkg } from './pkg'
+import { DB_BACKUPS_DIR, DB_EXPORT_MAX_BYTES, DB_IMPORT_MAX_BYTES, DB_ROWS_MAX_LIMIT, MSSQL_BACKUP_DIR, REDIS_KEY_ITEMS_MAX, REDIS_KEY_PAGE_MAX, REDIS_MAXMEMORY_POLICIES, isStrongSqlPassword } from '@shared/modules/databases'
+import { assertAbsPath, assertPort, b64Echo, shq } from '../ssh/shell'
+import { installCmd, pkgEnv, removeCmd, runPkg } from './pkg'
 
 /*
  * Databases module (main process).
@@ -67,11 +74,14 @@ function getCred(serverId: string, engine: DbEngine): Cred | undefined {
   return creds.get(serverId)?.[engine]
 }
 
-const AUTH_RE = /access denied|password authentication failed|authentication failed|requires authentication|peer authentication failed|ERROR 1045|Unauthorized|not authorized|Login failed for user|credentials required/i
-const DOWN_RE = /can't connect to local|could not connect to server|connection refused|No such file or directory|ECONNREFUSED|is the server running|MongoNetworkError|Connection reset|TCP Provider|Could not open a connection|Unable to connect|Login timeout expired/i
+const AUTH_RE = /access denied|password authentication failed|authentication failed|requires authentication|peer authentication failed|ERROR 1045|Unauthorized|not authorized|Login failed for user|credentials required|NOAUTH|WRONGPASS|AUTH failed|NOPERM|called without any password configured/i
+const DOWN_RE = /can't connect to local|could not connect to server|connection refused|No such file or directory|ECONNREFUSED|is the server running|MongoNetworkError|Connection reset|TCP Provider|Could not open a connection|Unable to connect|Login timeout expired|Could not connect to Redis/i
 
 /** mssql: TCP port learned from mssql.conf (default 1433), per server. */
 const mssqlPorts = new Map<string, number>()
+
+/** redis: how redis-cli reaches the server (learned from redis.conf), per server. */
+const redisConns = new Map<string, { host: string; port: number; socket?: string }>()
 
 function throwExec(engine: DbEngine, r: ExecResult, fallback: string): never {
   const msg = (r.stderr || r.stdout || fallback).trim()
@@ -82,7 +92,7 @@ function throwExec(engine: DbEngine, r: ExecResult, fallback: string): never {
 }
 
 function engineLabel(e: DbEngine): string {
-  return e === 'mysql' ? 'MySQL/MariaDB' : e === 'postgres' ? 'PostgreSQL' : e === 'mongo' ? 'MongoDB' : e === 'mssql' ? 'SQL Server' : 'SQLite'
+  return e === 'mysql' ? 'MySQL/MariaDB' : e === 'postgres' ? 'PostgreSQL' : e === 'mongo' ? 'MongoDB' : e === 'mssql' ? 'SQL Server' : e === 'redis' ? 'Redis' : 'SQLite'
 }
 
 /* ------------------------------------------------------------------ */
@@ -115,7 +125,7 @@ function assertHost(h: unknown): string {
 }
 
 function assertEngine(e: unknown): DbEngine {
-  if (e === 'mysql' || e === 'postgres' || e === 'mongo' || e === 'mssql' || e === 'sqlite') return e
+  if (e === 'mysql' || e === 'postgres' || e === 'mongo' || e === 'mssql' || e === 'redis' || e === 'sqlite') return e
   throw new Error(`Unknown database engine: ${String(e)}`)
 }
 const SYSTEM_MSSQL_DBS = new Set(['master', 'model', 'msdb', 'tempdb'])
@@ -420,6 +430,288 @@ async function mssqlQuery(ssh: SshClient, serverId: string, sql: string, o: Driv
   return p.grids[0] ?? { columns: [], rows: [] }
 }
 
+// ---- Redis (redis-cli) ----
+
+/** systemd unit names in detection order: Debian/Ubuntu, RHEL/Fedora/Arch, openSUSE instance template. */
+const REDIS_UNITS = ['redis-server', 'redis', 'redis@default']
+const REDIS_CONF_FILES = ['/etc/redis/redis.conf', '/etc/redis.conf', '/etc/redis/default.conf']
+/** Error replies redis-cli prints in raw mode (the reply text without "(error)"). */
+const REDIS_ERR_RE = /^(ERR|NOAUTH|WRONGPASS|WRONGTYPE|NOPERM|MISCONF|READONLY|LOADING|BUSY|NOSCRIPT|OOM|EXECABORT|NOGROUP|CROSSSLOT|TRYAGAIN|CLUSTERDOWN|MOVED|ASK|MASTERDOWN|NOREPLICAS|UNBLOCKED|UNKILLABLE)\b/
+
+interface RedisOpts extends Omit<DriverOpts, 'db'> {
+  /** Database index 0-15 (SELECT). */
+  db?: number
+  /** Human-readable (interactive style) output instead of --raw. */
+  noRaw?: boolean
+}
+
+function assertRedisDb(v: unknown): number {
+  const n = Number(v ?? 0)
+  if (!Number.isInteger(n) || n < 0 || n > 15) throw new Error('Database index must be between 0 and 15')
+  return n
+}
+
+function assertRedisKey(k: unknown): string {
+  if (typeof k !== 'string' || k.length === 0 || k.length > 65536 || k.includes('\0')) throw new Error('Invalid key')
+  return k
+}
+
+/**
+ * Build the redis-cli invocation. The password travels in REDISCLI_AUTH (exported by the exec
+ * wrapper, never on the command line); ACL user names other than "default" go through --user.
+ */
+function redisCmd(serverId: string, args: string[], o: RedisOpts = {}): { cmd: string; env?: Record<string, string>; sudo: boolean } {
+  const cred = getCred(serverId, 'redis')
+  const conn = redisConns.get(serverId) ?? { host: '127.0.0.1', port: 6379 }
+  const parts = ['redis-cli', o.noRaw ? '--no-raw' : '--raw']
+  if (conn.socket) parts.push('-s', conn.socket)
+  else parts.push('-h', conn.host, '-p', String(conn.port))
+  if (o.db) parts.push('-n', String(o.db))
+  if (cred && cred.user && cred.user !== 'default') parts.push('--user', cred.user)
+  for (const a of args) parts.push(a)
+  // A unix socket is usually owned by the redis user, so talk to it as root.
+  return { cmd: parts.map(shq).join(' '), env: cred ? { REDISCLI_AUTH: cred.password } : undefined, sudo: !!conn.socket }
+}
+
+async function redisExec(ssh: SshClient, serverId: string, args: string[], o: RedisOpts = {}): Promise<ExecResult> {
+  const { cmd, env, sudo } = redisCmd(serverId, args, o)
+  return ssh.exec(cmd, { sudo, env, timeoutMs: o.timeoutMs ?? 30000, maxBuffer: o.maxBuffer, signal: o.signal })
+}
+
+/** Run one command in --raw mode and return stdout (without the trailing newline); throws on errors. */
+async function redisRun(ssh: SshClient, serverId: string, args: string[], o: RedisOpts = {}): Promise<string> {
+  const r = await redisExec(ssh, serverId, args, o)
+  const out = r.stdout.replace(/\r\n/g, '\n').replace(/\n$/, '')
+  const firstLine = out.split('\n')[0] ?? ''
+  if (r.code !== 0 || REDIS_ERR_RE.test(firstLine) || /AUTH failed|Could not connect/i.test(r.stderr)) {
+    throwExec('redis', { code: r.code || 1, stdout: REDIS_ERR_RE.test(firstLine) ? firstLine : '', stderr: r.stderr.replace(/^Warning:.*\n?/gm, '').trim() || firstLine }, 'redis-cli failed')
+  }
+  return out
+}
+
+/** Run a Lua script that returns cjson-encoded data (one round trip, no reply-format parsing). */
+async function redisEval<T>(ssh: SshClient, serverId: string, lua: string, keys: string[], argv: string[], o: RedisOpts = {}): Promise<T> {
+  const out = await redisRun(ssh, serverId, ['EVAL', lua, String(keys.length), ...keys, ...argv], o)
+  try {
+    return JSON.parse(out) as T
+  } catch {
+    throw new DbError('DB_ERROR', out.split('\n').slice(0, 6).join('\n') || 'No result from redis-cli')
+  }
+}
+
+/** cjson encodes an empty Lua table as {}; normalise to an array. */
+function luaArr<T>(v: unknown): T[] {
+  return Array.isArray(v) ? (v as T[]) : []
+}
+
+/** Parse `INFO` output (section headers "# Name", "key:value" lines). */
+function parseRedisInfo(text: string): Record<string, string> {
+  const kv: Record<string, string> = {}
+  for (const raw of splitLines(text)) {
+    const l = raw.trim()
+    if (!l || l.startsWith('#')) continue
+    const i = l.indexOf(':')
+    if (i > 0) kv[l.slice(0, i)] = l.slice(i + 1)
+  }
+  return kv
+}
+
+/** Active (non-comment) directives of a redis.conf: name → value (last occurrence wins, like redis). */
+function parseRedisConf(lines: string[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const raw of lines) {
+    const l = raw.trim()
+    if (!l || l.startsWith('#')) continue
+    const m = l.match(/^([A-Za-z][A-Za-z0-9-]*)\s*(.*)$/)
+    if (!m) continue
+    const name = m[1].toLowerCase()
+    const val = m[2].trim().replace(/^"(.*)"$/, '$1')
+    // `save` may repeat (one line per rule); keep them all.
+    out[name] = name === 'save' && out[name] !== undefined ? `${out[name]} ${val}`.trim() : val
+  }
+  return out
+}
+
+/** Decide how redis-cli should connect given the bind / port / unixsocket directives. */
+function redisConnFrom(conf: Record<string, string>): { host: string; port: number; socket?: string } {
+  const port = num(conf.port) ?? 6379
+  if (port === 0 && conf.unixsocket) return { host: '127.0.0.1', port: 0, socket: conf.unixsocket }
+  const binds = (conf.bind ?? '127.0.0.1 -::1')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((b) => b.replace(/^-/, ''))
+  const loop4 = binds.some((b) => b === '127.0.0.1' || b === '0.0.0.0' || b === '*' || b === 'localhost')
+  const loop6 = binds.some((b) => b === '::1' || b === '::' || b === '::*')
+  const host = loop4 ? '127.0.0.1' : loop6 ? '::1' : binds[0] || '127.0.0.1'
+  return { host, port }
+}
+
+function redisInfoFrom(conf: Record<string, string>, configFile: string | undefined): RedisInfo {
+  const conn = redisConnFrom(conf)
+  return {
+    configFile,
+    bind: conf.bind ?? '127.0.0.1 -::1',
+    port: conn.port,
+    unixSocket: conf.unixsocket || undefined,
+    passwordSet: !!conf.requirepass,
+    protectedMode: !/^no$/i.test(conf['protected-mode'] ?? 'yes'),
+    maxmemoryConfig: conf.maxmemory || '0',
+    maxmemoryPolicy: conf['maxmemory-policy'] || 'noeviction',
+    appendonly: /^yes$/i.test(conf.appendonly ?? 'no'),
+    save: conf.save,
+    dir: conf.dir,
+    dbfilename: conf.dbfilename
+  }
+}
+
+function applyRedisInfo(info: RedisInfo, kv: Record<string, string>): void {
+  info.usedMemory = num(kv.used_memory)
+  info.usedMemoryPeak = num(kv.used_memory_peak)
+  info.usedMemoryRss = num(kv.used_memory_rss)
+  info.maxmemory = num(kv.maxmemory)
+  if (kv.maxmemory_policy) info.maxmemoryPolicy = kv.maxmemory_policy
+  info.connectedClients = num(kv.connected_clients)
+  info.blockedClients = num(kv.blocked_clients)
+  info.uptimeSec = num(kv.uptime_in_seconds)
+  info.aofEnabled = kv.aof_enabled === '1'
+  info.rdbLastSaveTime = num(kv.rdb_last_save_time)
+  info.rdbChangesSinceSave = num(kv.rdb_changes_since_last_save)
+  info.rdbBgsaveInProgress = kv.rdb_bgsave_in_progress === '1'
+  info.rdbLastBgsaveStatus = kv.rdb_last_bgsave_status
+  info.aofRewriteInProgress = kv.aof_rewrite_in_progress === '1'
+  info.role = kv.role
+  info.opsPerSec = num(kv.instantaneous_ops_per_sec)
+  info.totalCommands = num(kv.total_commands_processed)
+  info.keyspaceHits = num(kv.keyspace_hits)
+  info.keyspaceMisses = num(kv.keyspace_misses)
+  info.evictedKeys = num(kv.evicted_keys)
+  info.expiredKeys = num(kv.expired_keys)
+  info.totalConnections = num(kv.total_connections_received)
+  info.rejectedConnections = num(kv.rejected_connections)
+  info.redisMode = kv.redis_mode
+  info.executable = kv.executable
+  if (kv.tcp_port && num(kv.tcp_port)) info.port = num(kv.tcp_port) ?? info.port
+  const ks: RedisInfo['keyspace'] = []
+  for (const [k, v] of Object.entries(kv)) {
+    const m = k.match(/^db(\d+)$/)
+    if (!m) continue
+    const f: Record<string, string> = {}
+    for (const part of v.split(',')) {
+      const [a, b] = part.split('=')
+      if (a) f[a] = b ?? ''
+    }
+    ks.push({ db: Number(m[1]), keys: num(f.keys) ?? 0, expires: num(f.expires) ?? 0, avgTtlMs: num(f.avg_ttl) })
+  }
+  ks.sort((a, b) => a.db - b.db)
+  info.keyspace = ks
+  info.totalKeys = ks.reduce((s, d) => s + d.keys, 0)
+}
+
+/** Split a command line the way redis-cli does: whitespace separated, "double" (with \n \t \xHH \\ \") and 'single' quotes. */
+function splitRedisArgs(line: string): string[] {
+  const out: string[] = []
+  let i = 0
+  const s = line
+  while (i < s.length) {
+    while (i < s.length && /\s/.test(s[i])) i++
+    if (i >= s.length) break
+    let cur = ''
+    let any = false
+    while (i < s.length && !/\s/.test(s[i])) {
+      any = true
+      const c = s[i]
+      if (c === '"') {
+        i++
+        while (i < s.length && s[i] !== '"') {
+          if (s[i] === '\\' && i + 1 < s.length) {
+            const n = s[i + 1]
+            if (n === 'x' && /^[0-9a-fA-F]{2}$/.test(s.slice(i + 2, i + 4))) {
+              cur += String.fromCharCode(parseInt(s.slice(i + 2, i + 4), 16))
+              i += 4
+              continue
+            }
+            cur += n === 'n' ? '\n' : n === 'r' ? '\r' : n === 't' ? '\t' : n === 'b' ? '\b' : n === 'a' ? '\x07' : n
+            i += 2
+            continue
+          }
+          cur += s[i++]
+        }
+        if (i >= s.length) throw new Error('Unbalanced double quotes in command')
+        i++
+      } else if (c === "'") {
+        i++
+        while (i < s.length && s[i] !== "'") {
+          if (s[i] === '\\' && s[i + 1] === "'") {
+            cur += "'"
+            i += 2
+            continue
+          }
+          cur += s[i++]
+        }
+        if (i >= s.length) throw new Error('Unbalanced single quotes in command')
+        i++
+      } else {
+        cur += c
+        i++
+      }
+    }
+    if (any) out.push(cur)
+  }
+  return out
+}
+
+/** Lua: SCAN one page and collect type / TTL / MEMORY USAGE for every key in a single round trip. */
+const REDIS_SCAN_LUA = `local r = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3])
+local out = { cursor = r[1], dbsize = redis.call('DBSIZE'), keys = {} }
+for i, k in ipairs(r[2]) do
+  local t = redis.call('TYPE', k)
+  if type(t) == 'table' then t = t['ok'] end
+  local ok, m = pcall(redis.call, 'MEMORY', 'USAGE', k)
+  if not ok or type(m) ~= 'number' then m = -1 end
+  out.keys[#out.keys + 1] = { k, t, redis.call('TTL', k), m }
+end
+return cjson.encode(out)`
+
+/** Lua: describe one key and fetch (the first N elements of) its value. */
+const REDIS_GET_LUA = `local k = KEYS[1]
+local n = tonumber(ARGV[1])
+local t = redis.call('TYPE', k)
+if type(t) == 'table' then t = t['ok'] end
+local out = { type = t, ttl = redis.call('TTL', k) }
+if t == 'none' then return cjson.encode(out) end
+local ok, m = pcall(redis.call, 'MEMORY', 'USAGE', k)
+if ok and type(m) == 'number' then out.size = m end
+if t == 'string' then
+  out.len = redis.call('STRLEN', k)
+  if out.len > 65536 then out.value = redis.call('GETRANGE', k, 0, 65535); out.truncated = true else out.value = redis.call('GET', k) end
+elseif t == 'hash' then
+  out.len = redis.call('HLEN', k)
+  if out.len <= n then out.items = redis.call('HGETALL', k) else out.items = redis.call('HSCAN', k, '0', 'COUNT', n)[2]; out.truncated = true end
+elseif t == 'list' then
+  out.len = redis.call('LLEN', k)
+  out.items = redis.call('LRANGE', k, 0, n - 1)
+  out.truncated = out.len > n
+elseif t == 'set' then
+  out.len = redis.call('SCARD', k)
+  if out.len <= n then out.items = redis.call('SMEMBERS', k) else out.items = redis.call('SSCAN', k, '0', 'COUNT', n)[2]; out.truncated = true end
+elseif t == 'zset' then
+  out.len = redis.call('ZCARD', k)
+  out.items = redis.call('ZRANGE', k, 0, n - 1, 'WITHSCORES')
+  out.truncated = out.len > n
+elseif t == 'stream' then
+  out.len = redis.call('XLEN', k)
+  local items = {}
+  for _, e in ipairs(redis.call('XRANGE', k, '-', '+', 'COUNT', n)) do
+    items[#items + 1] = e[1]
+    items[#items + 1] = table.concat(e[2], ' ')
+  end
+  out.items = items
+  out.truncated = out.len > n
+end
+return cjson.encode(out)`
+
+const REDIS_SLOWLOG_LUA = `return cjson.encode({ entries = redis.call('SLOWLOG', 'GET', tonumber(ARGV[1])) })`
+
 /** Dispatch a plain query (header + rows) to the right engine. `db` is the file path for sqlite. */
 async function query(engine: DbEngine, ssh: SshClient, serverId: string, db: string | undefined, sql: string, o: DriverOpts = {}): Promise<Grid> {
   switch (engine) {
@@ -459,7 +751,7 @@ function requireSystemd(ssh: SshClient): void {
 }
 
 async function unitFor(ssh: SshClient, engine: DbEngine): Promise<string> {
-  const candidates = engine === 'mysql' ? ['mariadb', 'mysql', 'mysqld'] : engine === 'postgres' ? ['postgresql'] : engine === 'mongo' ? ['mongod', 'mongodb'] : engine === 'mssql' ? ['mssql-server'] : []
+  const candidates = engine === 'mysql' ? ['mariadb', 'mysql', 'mysqld'] : engine === 'postgres' ? ['postgresql'] : engine === 'mongo' ? ['mongod', 'mongodb'] : engine === 'mssql' ? ['mssql-server'] : engine === 'redis' ? REDIS_UNITS : []
   if (engine === 'postgres') {
     const r = await ssh.exec(
       `if systemctl cat postgresql.service >/dev/null 2>&1; then echo postgresql; else systemctl list-unit-files --no-legend 'postgresql*.service' 2>/dev/null | awk '{print $1}' | grep -v '@\\.service$' | head -1 | sed 's/\\.service$//'; fi`
@@ -549,6 +841,14 @@ echo __MSSQLACTIVE; systemctl is-active mssql-server 2>/dev/null
 echo __MSSQLENABLED; systemctl is-enabled mssql-server 2>/dev/null
 echo __MSSQLCONF; cat /var/opt/mssql/mssql.conf 2>/dev/null
 echo __MSSQLSIZE; du -sb /var/opt/mssql/data 2>/dev/null | awk '{print $1}'
+echo __REDISD; command -v redis-server >/dev/null 2>&1 && { echo yes; redis-server --version 2>/dev/null | head -1; }
+echo __REDISCLI; command -v redis-cli >/dev/null 2>&1 && echo yes
+RU=$(for u in ${REDIS_UNITS.join(' ')}; do if systemctl cat "$u.service" >/dev/null 2>&1; then echo "$u"; break; fi; done)
+echo __REDISUNIT; echo "$RU"
+echo __REDISACTIVE; [ -n "$RU" ] && systemctl is-active "$RU" 2>/dev/null
+echo __REDISENABLED; [ -n "$RU" ] && systemctl is-enabled "$RU" 2>/dev/null
+echo __REDISCONF; for f in ${REDIS_CONF_FILES.join(' ')}; do if [ -f "$f" ]; then echo "$f"; grep -E '^[[:space:]]*(bind|port|requirepass|unixsocket|dir|dbfilename|maxmemory|maxmemory-policy|appendonly|protected-mode|save)([[:space:]]|$)' "$f" 2>/dev/null; break; fi; done
+echo __REDISSIZE; D=$(for f in ${REDIS_CONF_FILES.join(' ')}; do [ -f "$f" ] && grep -E '^[[:space:]]*dir[[:space:]]' "$f" | tail -1 | awk '{print $2}' && break; done); du -sb "\${D:-/var/lib/redis}" 2>/dev/null | awk '{print $1}'
 echo __MEM; awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo 2>/dev/null
 echo __SQLITE; sqlite3 --version 2>/dev/null | head -1
 echo __BACKUPS; (ls -1 ${DB_BACKUPS_DIR} 2>/dev/null; ls -1 ${MSSQL_BACKUP_DIR}/*.bak 2>/dev/null) | wc -l
@@ -760,12 +1060,56 @@ async function status(ssh: SshClient, serverId: string): Promise<DbStatusSummary
     }
   }
 
+  // ---- Redis ----
+  const redisUnit = first(sec, 'REDISUNIT')
+  const redisdLines = (sec.REDISD ?? []).map((l) => l.trim()).filter(Boolean)
+  const confLines = (sec.REDISCONF ?? []).filter((l) => l.trim())
+  const redisConfFile = confLines[0]?.trim().startsWith('/') ? confLines[0].trim() : undefined
+  const rconf = parseRedisConf(redisConfFile ? confLines.slice(1) : [])
+  const rinfo = redisInfoFrom(rconf, redisConfFile)
+  redisConns.set(serverId, redisConnFrom(rconf))
+  const redis: DbEngineStatus = {
+    engine: 'redis',
+    installed: redisdLines[0] === 'yes' || !!redisUnit,
+    version: (redisdLines[1] ?? '').match(/v=([\d.]+)/)?.[1],
+    unit: redisUnit || undefined,
+    running: first(sec, 'REDISACTIVE') === 'active',
+    enabled: first(sec, 'REDISENABLED') === 'enabled',
+    clientAvailable: first(sec, 'REDISCLI') === 'yes',
+    dumpToolAvailable: first(sec, 'REDISCLI') === 'yes',
+    usingCredentials: !!getCred(serverId, 'redis'),
+    dataDir: rconf.dir || undefined,
+    port: rinfo.port || undefined,
+    bindAddress: rinfo.unixSocket && rinfo.port === 0 ? `unix:${rinfo.unixSocket}` : rinfo.bind,
+    sizeBytes: num(first(sec, 'REDISSIZE')),
+    redis: rinfo
+  }
+  if (redis.installed && redis.running && redis.clientAvailable) {
+    if (rinfo.passwordSet && !getCred(serverId, 'redis')) {
+      redis.authOk = false
+      redis.authError = 'Redis requires a password (requirepass is set). Enter it under "Admin credentials" (user: default).'
+    } else {
+      try {
+        const kv = parseRedisInfo(await redisRun(ssh, serverId, ['INFO'], { timeoutMs: 20000 }))
+        applyRedisInfo(rinfo, kv)
+        redis.authOk = true
+        if (kv.redis_version) redis.version = kv.redis_version
+        redis.port = rinfo.port || undefined
+        redis.details = { mode: kv.redis_mode ?? '', role: kv.role ?? '', persistence: [rinfo.save === '' ? 'RDB off' : 'RDB', rinfo.aofEnabled ? 'AOF' : null].filter(Boolean).join(' + '), configFile: kv.config_file || rinfo.configFile || '' }
+      } catch (e) {
+        redis.authOk = false
+        redis.authError = e instanceof Error ? e.message : String(e)
+      }
+    }
+  }
+
   const sqliteVer = first(sec, 'SQLITE')
   return {
     mysql,
     postgres,
     mongo,
     mssql,
+    redis,
     sqlite: { installed: !!sqliteVer, version: sqliteVer.split(' ')[0] || undefined },
     backupsDir: DB_BACKUPS_DIR,
     backupsCount: Number(first(sec, 'BACKUPS')) || 0,
@@ -939,6 +1283,60 @@ async function installMssql(ssh: SshClient, serverId: string, h: TaskHandle, inp
   }
   if (!ok) throw new Error('SQL Server installed but did not accept a connection within 60 s; check "journalctl -u mssql-server".')
   h.log('SQL Server is up (localhost:1433). SA credentials are kept in memory for this session.')
+}
+
+function redisPackages(ssh: SshClient): string[] {
+  const pm = ssh.os?.pkgManager
+  if (pm === 'apt') return ['redis-server']
+  if (pm === 'dnf' || pm === 'yum' || pm === 'zypper' || pm === 'apk' || pm === 'pacman') return ['redis']
+  throw new Error(`Redis installation is not supported on ${ssh.os?.prettyName}`)
+}
+
+async function redisUnitOrNone(ssh: SshClient): Promise<string> {
+  const r = await ssh.exec(`for u in ${REDIS_UNITS.join(' ')}; do if systemctl cat "$u.service" >/dev/null 2>&1; then echo "$u"; break; fi; done`)
+  return r.stdout.trim()
+}
+
+async function installRedis(ssh: SshClient, serverId: string, h: TaskHandle): Promise<void> {
+  requireSystemd(ssh)
+  const pkgs = redisPackages(ssh)
+  h.log(`Installing ${pkgs.join(' ')} …`)
+  await runPkg(ssh, installCmd(ssh, pkgs), taskIo(h))
+  let unit = await redisUnitOrNone(ssh)
+  if (unit === 'redis@default' || (!unit && ssh.os?.pkgManager === 'zypper')) {
+    // openSUSE ships an instance template: /etc/redis/<name>.conf + redis@<name>.service.
+    h.log('Creating the "default" instance from /etc/redis/default.conf.example …')
+    await ssh.sudoRun('[ -f /etc/redis/default.conf ] || { cp /etc/redis/default.conf.example /etc/redis/default.conf && chown root:redis /etc/redis/default.conf && chmod 640 /etc/redis/default.conf; }')
+    unit = 'redis@default'
+  }
+  if (!unit) throw new Error('Redis was installed but no systemd unit (redis-server / redis) was found')
+  h.log(`Enabling and starting ${unit} …`)
+  await ssh.sudoRun(`systemctl daemon-reload; systemctl enable --now ${shq(unit)}`, { timeoutMs: 180000 })
+  // Learn the connection details from the fresh config before the health check.
+  const cf = await ssh.sudo(`for f in ${REDIS_CONF_FILES.join(' ')}; do if [ -f "$f" ]; then grep -E '^[[:space:]]*(bind|port|unixsocket)([[:space:]]|$)' "$f"; break; fi; done`)
+  redisConns.set(serverId, redisConnFrom(parseRedisConf(splitLines(cf.stdout))))
+  h.log('Health check …')
+  let pong = ''
+  for (let i = 0; i < 10 && pong !== 'PONG'; i++) {
+    await new Promise((r) => setTimeout(r, 1000))
+    pong = await redisRun(ssh, serverId, ['PING'], { timeoutMs: 15000 }).catch(() => '')
+  }
+  if (pong !== 'PONG') throw new Error('Redis installed but did not answer PING within 10 s; check "journalctl -u ' + unit + '".')
+  const conn = redisConns.get(serverId)
+  h.log(`Redis is up (${conn?.socket ? conn.socket : `${conn?.host}:${conn?.port}`}, no password by default; protected mode keeps remote clients out until a password is set).`)
+}
+
+async function removeRedis(ssh: SshClient, h: TaskHandle): Promise<void> {
+  // Debian splits the CLI into redis-tools; take it along so redis-cli does not linger.
+  const pkgs = ssh.os?.pkgManager === 'apt' ? ['redis-server', 'redis-tools'] : redisPackages(ssh)
+  const unit = await redisUnitOrNone(ssh)
+  if (unit && ssh.os?.hasSystemd) {
+    h.log(`Stopping and disabling ${unit} …`)
+    await ssh.sudo(`systemctl disable --now ${shq(unit)}`, { timeoutMs: 120000 })
+  }
+  h.log(`Removing ${pkgs.join(' ')} …`)
+  await runPkg(ssh, removeCmd(ssh, pkgs), taskIo(h))
+  h.log('Redis packages removed. The data directory (dump.rdb / appendonly files) and the config file were left in place.')
 }
 
 async function installSqlite(ssh: SshClient, h: TaskHandle): Promise<void> {
@@ -1360,6 +1758,10 @@ export function register(ctx: Ctx): void {
       else if (engine === 'postgres') await pgQuery(ssh, serverId, 'SELECT 1', { skipHeader: true, timeoutMs: 20000 })
       else if (engine === 'mongo') await mongoEval(ssh, serverId, "print('__SM__' + JSON.stringify(db.getSiblingDB('admin').runCommand({ ping: 1 })));", { timeoutMs: 20000 })
       else if (engine === 'mssql') await mssqlQuery(ssh, serverId, 'SELECT 1', { timeoutMs: 30000 })
+      else if (engine === 'redis') {
+        const pong = await redisRun(ssh, serverId, ['PING'], { timeoutMs: 20000 })
+        if (pong !== 'PONG') throw new DbError('DB_ERROR', `Unexpected PING reply: ${pong}`)
+      }
     }
     return { stored: !!user }
   })
@@ -1368,7 +1770,11 @@ export function register(ctx: Ctx): void {
     const engine = assertEngine(engineRaw)
     const ssh = ctx.ssh(serverId)
     const mysqlVariant = variant === 'mariadb' ? 'mariadb' : 'mysql'
-    const title = engine === 'mysql' ? `Install ${mysqlVariant === 'mariadb' ? 'MariaDB' : 'MySQL'}` : engine === 'postgres' ? 'Install PostgreSQL' : engine === 'mongo' ? 'Install MongoDB 8.0' : engine === 'mssql' ? 'Install SQL Server 2022' : 'Install sqlite3'
+    const title = engine === 'mysql' ? `Install ${mysqlVariant === 'mariadb' ? 'MariaDB' : 'MySQL'}` : engine === 'postgres' ? 'Install PostgreSQL' : engine === 'mongo' ? 'Install MongoDB 8.0' : engine === 'mssql' ? 'Install SQL Server 2022' : engine === 'redis' ? 'Install Redis' : 'Install sqlite3'
+    if (engine === 'redis') {
+      requireSystemd(ssh)
+      redisPackages(ssh)
+    }
     if (engine === 'mssql') {
       // Validate up-front so the dialog gets an immediate error instead of a failed task.
       const input = (variant ?? {}) as MssqlInstallInput
@@ -1381,6 +1787,7 @@ export function register(ctx: Ctx): void {
       else if (engine === 'postgres') await installPostgres(ssh, h)
       else if (engine === 'mongo') await installMongo(ssh, h)
       else if (engine === 'mssql') await installMssql(ssh, serverId, h, variant as MssqlInstallInput)
+      else if (engine === 'redis') await installRedis(ssh, serverId, h)
       else await installSqlite(ssh, h)
       ctx.audit(serverId, 'db.install', `${engine}${engine === 'mysql' ? ' ' + mysqlVariant : engine === 'mssql' ? ' ' + String((variant as MssqlInstallInput).edition) : ''}`)
     })
@@ -1947,6 +2354,245 @@ DROP LOGIN ${qBr(u)};`
     )
     ctx.audit(serverId, 'db.mongo.eval', `${db}: ${js.slice(0, 120)}`)
     return { output: res.out, ms: Date.now() - t0 }
+  })
+
+  // ---------------- Redis specific ----------------
+  ctx.handle('db:redis:remove', async (serverId: string) => {
+    const ssh = ctx.ssh(serverId)
+    redisPackages(ssh)
+    const { id } = ctx.tasks.start('Remove Redis', serverId, async (h) => {
+      await removeRedis(ssh, h)
+      ctx.audit(serverId, 'db.redis.remove', '')
+    })
+    return id
+  })
+
+  ctx.handle('db:redis:configure', async (serverId: string, patchRaw: RedisConfigPatch) => {
+    const ssh = ctx.ssh(serverId)
+    requireSystemd(ssh)
+    const patch = patchRaw ?? {}
+    // ---- validate (everything ends up inside the config file, never in a shell string) ----
+    const set: Record<string, string | null> = {}
+    const changes: string[] = []
+    if (patch.bind !== undefined) {
+      const toks = String(patch.bind).trim().split(/\s+/).filter(Boolean)
+      if (!toks.length || toks.some((t) => !/^-?(\*|[0-9A-Za-z.:*]{1,64})$/.test(t))) throw new Error('Bind address must be one or more IP addresses (e.g. "127.0.0.1 -::1" or "0.0.0.0")')
+      set.bind = toks.join(' ')
+      changes.push(`bind=${set.bind}`)
+    }
+    if (patch.port !== undefined) {
+      set.port = String(assertPort(Number(patch.port)))
+      changes.push(`port=${set.port}`)
+    }
+    if (patch.requirepass !== undefined) {
+      const pw = String(patch.requirepass)
+      if (pw === '') {
+        set.requirepass = null
+        changes.push('requirepass cleared')
+      } else {
+        if (pw.length < 8 || pw.length > 512 || /[\s"'\\]/.test(pw)) throw new Error('The password must be 8–512 characters without spaces, quotes or backslashes')
+        set.requirepass = pw
+        changes.push('requirepass set')
+      }
+    }
+    if (patch.maxmemory !== undefined) {
+      const mm = String(patch.maxmemory).trim().toLowerCase() || '0'
+      if (!/^\d{1,15}(b|k|kb|m|mb|g|gb)?$/.test(mm)) throw new Error('maxmemory must be a size like 256mb, 2gb or 0 (unlimited)')
+      set.maxmemory = mm
+      changes.push(`maxmemory=${mm}`)
+    }
+    if (patch.maxmemoryPolicy !== undefined) {
+      const pol = String(patch.maxmemoryPolicy)
+      if (!(REDIS_MAXMEMORY_POLICIES as readonly string[]).includes(pol)) throw new Error('Unknown maxmemory-policy')
+      set['maxmemory-policy'] = pol
+      changes.push(`maxmemory-policy=${pol}`)
+    }
+    if (patch.appendonly !== undefined) {
+      set.appendonly = patch.appendonly ? 'yes' : 'no'
+      changes.push(`appendonly=${set.appendonly}`)
+    }
+    if (!Object.keys(set).length) return
+
+    // ---- locate + read the config file ----
+    const loc = await ssh.sudo(`for f in ${REDIS_CONF_FILES.join(' ')}; do if [ -f "$f" ]; then echo "$f"; break; fi; done`)
+    const file = loc.stdout.trim().split('\n')[0]
+    if (!file) throw new Error(`No redis.conf found (looked at ${REDIS_CONF_FILES.join(', ')})`)
+    const cur = await ssh.sudo(`cat ${shq(file)}`, { maxBuffer: 4 * 1024 * 1024 })
+    if (cur.code !== 0) throw new Error(cur.stderr.trim() || `Could not read ${file}`)
+    const original = cur.stdout
+    const lines = original.replace(/\r\n/g, '\n').split('\n')
+    if (lines.length && lines[lines.length - 1] === '') lines.pop()
+
+    // ---- rewrite directives in TypeScript: replace the first active line, drop duplicates, append missing ----
+    const pending = new Map(Object.entries(set))
+    const out: string[] = []
+    for (const line of lines) {
+      const m = line.match(/^\s*([A-Za-z][A-Za-z0-9-]*)(\s|$)/)
+      const name = m ? m[1].toLowerCase() : ''
+      if (name && Object.prototype.hasOwnProperty.call(set, name)) {
+        if (pending.has(name)) {
+          const v = pending.get(name)
+          pending.delete(name)
+          if (v !== null) out.push(`${name} ${v}`)
+        }
+        continue // drop further active occurrences (and the cleared directive)
+      }
+      out.push(line)
+    }
+    const additions = [...pending.entries()].filter(([, v]) => v !== null)
+    if (additions.length) {
+      out.push('', `# Added by Central Server ${new Date().toISOString().slice(0, 19).replace('T', ' ')}`)
+      for (const [k, v] of additions) out.push(`${k} ${v}`)
+    }
+    const content = out.join('\n') + '\n'
+
+    // ---- backup, write (the redirect keeps owner/mode), restart, verify; roll back on failure ----
+    const unit = await unitFor(ssh, 'redis')
+    const backup = `${file}.bak-${ts()}`
+    await ssh.sudoRun(`cp -a ${shq(file)} ${shq(backup)} && ${b64Echo(content)} > ${shq(file)}`)
+    const newConf = parseRedisConf(out)
+    const prevConn = redisConns.get(serverId)
+    redisConns.set(serverId, redisConnFrom(newConf))
+    const prevCred = getCred(serverId, 'redis')
+    const map = creds.get(serverId) ?? {}
+    if (set.requirepass === null) delete map.redis
+    else if (typeof set.requirepass === 'string') map.redis = { user: 'default', password: set.requirepass }
+    creds.set(serverId, map)
+
+    const restart = await ssh.sudo(`systemctl restart ${shq(unit)} && sleep 1 && systemctl is-active ${shq(unit)}`, { timeoutMs: 120000 })
+    let pong = ''
+    if (restart.code === 0 && restart.stdout.trim().endsWith('active')) {
+      for (let i = 0; i < 5 && pong !== 'PONG'; i++) {
+        pong = await redisRun(ssh, serverId, ['PING'], { timeoutMs: 15000 }).catch((e: Error) => `ERR ${e.message}`)
+        if (pong !== 'PONG') await new Promise((r) => setTimeout(r, 1000))
+      }
+    }
+    if (pong !== 'PONG') {
+      const journal = await ssh.sudo(`journalctl -u ${shq(unit)} -n 15 --no-pager 2>/dev/null | tail -n 15`)
+      // Roll back: restore the previous file, credentials and connection details, restart again.
+      await ssh.sudo(`cp -a ${shq(backup)} ${shq(file)} && systemctl restart ${shq(unit)}`, { timeoutMs: 120000 })
+      if (prevConn) redisConns.set(serverId, prevConn)
+      if (prevCred) map.redis = prevCred
+      else delete map.redis
+      creds.set(serverId, map)
+      const why = restart.code !== 0 || !restart.stdout.includes('active') ? 'the service did not come back' : `the server does not answer (${pong.slice(0, 160)})`
+      throw new Error(`Redis configuration rolled back (${backup} restored): ${why}.\n${journal.stdout.trim().split('\n').slice(-8).join('\n')}`)
+    }
+    ctx.audit(serverId, 'db.redis.configure', changes.join(' '))
+    return { file, backup }
+  })
+
+  ctx.handle('db:redis:scan', async (serverId: string, dbRaw: unknown, patternRaw: unknown, cursorRaw: unknown, countRaw: unknown): Promise<RedisScanResult> => {
+    const db = assertRedisDb(dbRaw)
+    const pattern = typeof patternRaw === 'string' && patternRaw.length && patternRaw.length <= 1024 && !patternRaw.includes('\0') ? patternRaw : '*'
+    const cursor = /^\d{1,20}$/.test(String(cursorRaw ?? '0')) ? String(cursorRaw ?? '0') : '0'
+    const count = clampInt(countRaw, 100, 10, REDIS_KEY_PAGE_MAX)
+    const res = await redisEval<{ cursor: string | number; dbsize: number; keys: unknown }>(ctx.ssh(serverId), serverId, REDIS_SCAN_LUA, [], [cursor, pattern, String(count)], { db, maxBuffer: 32 * 1024 * 1024 })
+    const keys: RedisKey[] = luaArr<[string, string, number, number]>(res.keys).map((k) => ({ key: String(k[0]), type: String(k[1]), ttl: Number(k[2]), sizeBytes: Number(k[3]) >= 0 ? Number(k[3]) : undefined }))
+    return { cursor: String(res.cursor), keys, dbSize: Number(res.dbsize) || 0 }
+  })
+
+  ctx.handle('db:redis:key', async (serverId: string, dbRaw: unknown, keyRaw: unknown): Promise<RedisKeyValue> => {
+    const db = assertRedisDb(dbRaw)
+    const key = assertRedisKey(keyRaw)
+    const r = await redisEval<{ type: string; ttl: number; size?: number; len?: number; value?: string; items?: unknown; truncated?: boolean }>(ctx.ssh(serverId), serverId, REDIS_GET_LUA, [key], [String(REDIS_KEY_ITEMS_MAX)], { db, maxBuffer: 16 * 1024 * 1024 })
+    return { key, type: r.type, ttl: Number(r.ttl), sizeBytes: r.size, length: r.len, value: r.value, items: r.items === undefined ? undefined : luaArr<unknown>(r.items).map((x) => String(x)), truncated: !!r.truncated }
+  })
+
+  ctx.handle('db:redis:setKey', async (serverId: string, dbRaw: unknown, keyRaw: unknown, valueRaw: unknown, ttlRaw?: unknown) => {
+    const db = assertRedisDb(dbRaw)
+    const key = assertRedisKey(keyRaw)
+    const value = String(valueRaw ?? '')
+    if (value.includes('\0') || value.length > 512 * 1024) throw new Error('Value must be at most 512 KB')
+    const args = ['SET', key, value]
+    if (ttlRaw !== undefined && ttlRaw !== null && ttlRaw !== '') {
+      const ttl = Math.floor(Number(ttlRaw))
+      if (!Number.isInteger(ttl) || ttl < 1) throw new Error('TTL must be a positive number of seconds')
+      args.push('EX', String(ttl))
+    }
+    const r = await redisRun(ctx.ssh(serverId), serverId, args, { db })
+    if (r !== 'OK') throw new DbError('DB_ERROR', r || 'SET failed')
+    ctx.audit(serverId, 'db.redis.setKey', `db${db} ${key.slice(0, 120)}`)
+  })
+
+  ctx.handle('db:redis:expire', async (serverId: string, dbRaw: unknown, keyRaw: unknown, ttlRaw: unknown) => {
+    const db = assertRedisDb(dbRaw)
+    const key = assertRedisKey(keyRaw)
+    let r: string
+    if (ttlRaw === null || ttlRaw === undefined || ttlRaw === '') r = await redisRun(ctx.ssh(serverId), serverId, ['PERSIST', key], { db })
+    else {
+      const ttl = Math.floor(Number(ttlRaw))
+      if (!Number.isInteger(ttl) || ttl < 1) throw new Error('TTL must be a positive number of seconds')
+      r = await redisRun(ctx.ssh(serverId), serverId, ['EXPIRE', key, String(ttl)], { db })
+    }
+    ctx.audit(serverId, 'db.redis.expire', `db${db} ${key.slice(0, 120)} -> ${ttlRaw === null || ttlRaw === undefined || ttlRaw === '' ? 'persist' : String(ttlRaw)}`)
+    return r === '1'
+  })
+
+  ctx.handle('db:redis:deleteKey', async (serverId: string, dbRaw: unknown, keyRaw: unknown) => {
+    const db = assertRedisDb(dbRaw)
+    const key = assertRedisKey(keyRaw)
+    const r = await redisRun(ctx.ssh(serverId), serverId, ['DEL', key], { db })
+    ctx.audit(serverId, 'db.redis.deleteKey', `db${db} ${key.slice(0, 120)}`)
+    return Number(r) || 0
+  })
+
+  ctx.handle('db:redis:command', async (serverId: string, dbRaw: unknown, lineRaw: unknown, raw?: unknown): Promise<{ output: string; ms: number }> => {
+    const db = assertRedisDb(dbRaw)
+    if (typeof lineRaw !== 'string' || !lineRaw.trim()) throw new Error('Empty command')
+    const args = splitRedisArgs(lineRaw.trim())
+    if (!args.length) throw new Error('Empty command')
+    if (args.some((a) => a.includes('\0'))) throw new Error('Arguments cannot contain NUL bytes')
+    const t0 = Date.now()
+    const r = await redisExec(ctx.ssh(serverId), serverId, args, { db, noRaw: !raw, timeoutMs: 60000, maxBuffer: 16 * 1024 * 1024 })
+    const err = r.stderr.replace(/^Warning:.*\n?/gm, '').trim()
+    if (r.code !== 0 && !r.stdout.trim() && err && (AUTH_RE.test(err) || DOWN_RE.test(err))) throwExec('redis', r, 'redis-cli failed')
+    ctx.audit(serverId, 'db.redis.command', `db${db}: ${lineRaw.trim().slice(0, 120)}`)
+    const output = [r.stdout.replace(/\n$/, ''), err].filter(Boolean).join('\n')
+    return { output: output || (r.code === 0 ? '(empty)' : `(exit ${r.code})`), ms: Date.now() - t0 }
+  })
+
+  ctx.handle('db:redis:slowlog', async (serverId: string, countRaw?: unknown): Promise<RedisSlowlogEntry[]> => {
+    const count = clampInt(countRaw, 25, 1, 128)
+    const res = await redisEval<{ entries: unknown }>(ctx.ssh(serverId), serverId, REDIS_SLOWLOG_LUA, [], [String(count)])
+    return luaArr<unknown[]>(res.entries).map((e) => ({
+      id: Number(e[0]),
+      time: Number(e[1]) * 1000,
+      durationUs: Number(e[2]),
+      command: luaArr<unknown>(e[3]).map(String).join(' '),
+      client: e[4] !== undefined ? String(e[4]) : undefined,
+      clientName: e[5] ? String(e[5]) : undefined
+    }))
+  })
+
+  ctx.handle('db:redis:clients', async (serverId: string): Promise<RedisClient[]> => {
+    const out = await redisRun(ctx.ssh(serverId), serverId, ['CLIENT', 'LIST'])
+    return splitLines(out)
+      .filter((l) => l.trim())
+      .map((l) => {
+        const f: Record<string, string> = {}
+        for (const tok of l.trim().split(' ')) {
+          const i = tok.indexOf('=')
+          if (i > 0) f[tok.slice(0, i)] = tok.slice(i + 1)
+        }
+        return { id: f.id ?? '', addr: f.addr ?? '', name: f.name ?? '', ageSec: Number(f.age) || 0, idleSec: Number(f.idle) || 0, db: Number(f.db) || 0, cmd: f.cmd ?? '', user: f.user, flags: f.flags ?? '' }
+      })
+  })
+
+  ctx.handle('db:redis:flush', async (serverId: string, dbRaw: unknown) => {
+    const all = dbRaw === null || dbRaw === undefined
+    const db = all ? 0 : assertRedisDb(dbRaw)
+    const r = await redisRun(ctx.ssh(serverId), serverId, [all ? 'FLUSHALL' : 'FLUSHDB'], { db, timeoutMs: 300000 })
+    if (r !== 'OK') throw new DbError('DB_ERROR', r || 'FLUSH failed')
+    ctx.audit(serverId, 'db.redis.flush', all ? 'FLUSHALL' : `FLUSHDB db${db}`)
+  })
+
+  ctx.handle('db:redis:bgsave', async (serverId: string): Promise<{ message: string; lastSave: number }> => {
+    const ssh = ctx.ssh(serverId)
+    const message = await redisRun(ssh, serverId, ['BGSAVE'])
+    const last = await redisRun(ssh, serverId, ['LASTSAVE']).catch(() => '0')
+    ctx.audit(serverId, 'db.redis.bgsave', '')
+    return { message, lastSave: (Number(last) || 0) * 1000 }
   })
 
   // ---------------- SQLite specific ----------------

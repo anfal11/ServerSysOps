@@ -100,6 +100,16 @@ export function reorderServers(ids: string[]): void {
 }
 
 /** Export profiles without secrets (for backup / sharing). */
+/** Decrypted secrets for every server (backup only; caller must encrypt before writing to disk). */
+export function exportAllSecrets(): Record<string, ServerSecrets> {
+  const out: Record<string, ServerSecrets> = {}
+  for (const s of listServers()) {
+    const sec = getSecrets(s.id)
+    if (Object.keys(sec).length) out[s.id] = sec
+  }
+  return out
+}
+
 export function exportServers(): ServerProfile[] {
   return listServers().map((s) => ({ ...s, hasPassword: false, hasPassphrase: false, hasSudoPassword: false, hasTotpSecret: false }))
 }

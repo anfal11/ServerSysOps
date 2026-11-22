@@ -5,8 +5,10 @@ import {
   ChevronRight,
   Database,
   Download,
+  Eraser,
   FileUp,
   FolderOpen,
+  HardDrive,
   History,
   KeyRound,
   Play,
@@ -14,10 +16,13 @@ import {
   Power,
   RefreshCw,
   RotateCw,
+  Save,
+  Search,
   Settings,
   Shield,
   Square,
   Table2,
+  Terminal,
   Trash2,
   Upload,
   UserPlus,
@@ -26,7 +31,7 @@ import {
 import type { PageProps } from '@/pages'
 import { api, ApiError, errMsg } from '@/lib/api'
 import { useApp } from '@/store/app'
-import { cls, fmtBytes, fmtDate } from '@/lib/format'
+import { cls, fmtBytes, fmtDate, fmtUptime } from '@/lib/format'
 import {
   Badge,
   Button,
@@ -71,9 +76,16 @@ import type {
   MongoCollection,
   MongoDocsResult,
   MssqlInstallInput,
+  RedisClient,
+  RedisConfigPatch,
+  RedisKey,
+  RedisKeyValue,
+  RedisScanResult,
+  RedisSlowlogEntry,
   SqliteOpenResult
 } from '@shared/modules/databases'
-import { DB_ENGINE_LABEL, DB_IMPORT_MAX_BYTES, MSSQL_BACKUP_DIR, MSSQL_EDITIONS, MSSQL_EULA_URL, isStrongSqlPassword } from '@shared/modules/databases'
+import { PackageUpdate } from '@/components/PackageUpdate'
+import { DB_ENGINE_LABEL, DB_IMPORT_MAX_BYTES, MSSQL_BACKUP_DIR, MSSQL_EDITIONS, MSSQL_EULA_URL, REDIS_KEY_ITEMS_MAX, REDIS_MAXMEMORY_POLICIES, isStrongSqlPassword } from '@shared/modules/databases'
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -87,6 +99,7 @@ const ENGINE_TABS: { id: DbEngine; label: string }[] = [
   { id: 'postgres', label: 'PostgreSQL' },
   { id: 'mongo', label: 'MongoDB' },
   { id: 'mssql', label: 'SQL Server' },
+  { id: 'redis', label: 'Redis' },
   { id: 'sqlite', label: 'SQLite client' }
 ]
 
@@ -170,6 +183,7 @@ export default function Databases({ serverId }: PageProps): React.JSX.Element {
     if (st.postgres.installed) parts.push(`PostgreSQL ${st.postgres.version ?? ''}`.trim())
     if (st.mongo.installed) parts.push(`MongoDB ${st.mongo.version ?? ''}`.trim())
     if (st.mssql.installed) parts.push(`SQL Server ${st.mssql.version ?? ''}`.trim())
+    if (st.redis.installed) parts.push(`Redis ${st.redis.version ?? ''}`.trim())
     return parts.length ? parts.join(' · ') : 'No database server installed'
   }, [st])
 
@@ -200,6 +214,8 @@ export default function Databases({ serverId }: PageProps): React.JSX.Element {
           <Loading />
         ) : engine === 'sqlite' ? (
           <SqliteClient serverId={serverId} installed={st.sqlite.installed} version={st.sqlite.version} reloadStatus={status.reload} />
+        ) : engine === 'redis' ? (
+          <RedisView serverId={serverId} st={st.redis} summary={st} reloadStatus={status.reload} />
         ) : (
           <EngineView key={engine} serverId={serverId} engine={engine} st={st[engine]} summary={st} reloadStatus={status.reload} />
         )}
@@ -211,6 +227,25 @@ export default function Databases({ serverId }: PageProps): React.JSX.Element {
 /* ------------------------------------------------------------------ */
 /* Engine view (server engines)                                        */
 /* ------------------------------------------------------------------ */
+
+/** Distro packages behind each engine, so the service card can offer one-click updates. */
+function enginePackages(engine: DbEngine, pkgManager: string | undefined): string[] {
+  const apt = pkgManager === 'apt'
+  switch (engine) {
+    case 'mysql':
+      return ['mariadb-server', 'mysql-server', 'mysql-community-server']
+    case 'postgres':
+      return apt ? ['postgresql', 'postgresql-common'] : ['postgresql-server', 'postgresql']
+    case 'mongo':
+      return ['mongodb-org', 'mongodb-org-server']
+    case 'mssql':
+      return ['mssql-server', 'mssql-tools18']
+    case 'redis':
+      return apt ? ['redis-server', 'redis-tools'] : ['redis', 'valkey']
+    default:
+      return []
+  }
+}
 
 function EngineView({ serverId, engine, st, summary, reloadStatus }: { serverId: string; engine: ServerEngine; st: DbEngineStatus; summary: DbStatusSummary; reloadStatus: () => Promise<void> }): React.JSX.Element {
   const [section, setSection] = useState<Section>('overview')
@@ -455,6 +490,7 @@ function EngineStatus({ serverId, engine, st, reload, onCredentials }: { serverI
       {st.needsInitdb && <Callout kind="warn">The PostgreSQL cluster is not initialised. Run <code>postgresql-setup --initdb</code> (RHEL) or <code>initdb</code> (Arch) before starting the service. The installer does this automatically.</Callout>}
       {!st.clientAvailable && <Callout kind="warn">The admin client ({CLIENT_NAME[engine]}) is not installed, so databases cannot be managed from here.{engine === 'mssql' && <> Install it with <code>ACCEPT_EULA=Y apt-get install mssql-tools18 unixodbc-dev</code> (or <code>dnf install mssql-tools18 unixODBC-devel</code>).</>}</Callout>}
       {engine === 'mongo' && st.running && st.authOk && !st.usingCredentials && <Callout>MongoDB is running without access control (default). Create an admin user in the Users section and enable <code>security.authorization</code> in /etc/mongod.conf if the server is reachable from outside.</Callout>}
+      <EnginePackageUpdate serverId={serverId} engine={engine} unit={st.unit} />
       <Card
         title="Service"
         actions={
@@ -610,8 +646,8 @@ function SecureModal({ serverId, st, onClose, onDone }: { serverId: string; st: 
   )
 }
 
-function CredentialsModal({ serverId, engine, onClose, onSaved }: { serverId: string; engine: ServerEngine; onClose: () => void; onSaved: () => void }): React.JSX.Element {
-  const [user, setUser] = useState(engine === 'postgres' ? 'postgres' : engine === 'mongo' ? 'admin' : engine === 'mssql' ? 'sa' : 'root')
+function CredentialsModal({ serverId, engine, onClose, onSaved }: { serverId: string; engine: ServerEngine | 'redis'; onClose: () => void; onSaved: () => void }): React.JSX.Element {
+  const [user, setUser] = useState(engine === 'postgres' ? 'postgres' : engine === 'mongo' ? 'admin' : engine === 'mssql' ? 'sa' : engine === 'redis' ? 'default' : 'root')
   const [pw, setPw] = useState('')
   const { run, busy } = useAction()
   const save = async (clear = false): Promise<void> => {
@@ -642,6 +678,7 @@ function CredentialsModal({ serverId, engine, onClose, onSaved }: { serverId: st
           {engine === 'postgres' && ' The connection is made to 127.0.0.1 with password authentication.'}
           {engine === 'mongo' && ' Authenticates against the admin database.'}
           {engine === 'mssql' && ' SQL Server always needs a SQL login (sa or another sysadmin); the password is passed to sqlcmd via SQLCMDPASSWORD.'}
+          {engine === 'redis' && ' Needed when requirepass is set. The password is passed to redis-cli via REDISCLI_AUTH; the user is "default" unless you use Redis ACL users.'}
         </Callout>
         <Field label="User">
           <Input value={user} onChange={(e) => setUser(e.target.value)} mono autoFocus />
@@ -1984,6 +2021,963 @@ function SqliteClient({ serverId, installed, version, reloadStatus }: { serverId
       </Card>
       {opened && tab === 'browse' && <DataBrowser key={opened.path} serverId={serverId} engine="sqlite" db={opened.path} />}
       {opened && tab === 'sql' && <SqlEditor key={opened.path} serverId={serverId} engine="sqlite" db={opened.path} />}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Redis                                                               */
+/* ------------------------------------------------------------------ */
+
+type RedisSection = 'overview' | 'keys' | 'config' | 'tools'
+
+const REDIS_DBS = Array.from({ length: 16 }, (_, i) => i)
+
+function fmtTtl(sec: number): React.ReactNode {
+  if (sec === -1) return <span className="text-dim">no expiry</span>
+  if (sec === -2) return <span className="text-danger-fg">gone</span>
+  if (sec < 60) return `${sec}s`
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`
+  return fmtUptime(sec)
+}
+
+function redisTypeColor(t: string): 'ok' | 'warn' | 'danger' | 'info' | 'muted' | 'accent' {
+  return t === 'string' ? 'ok' : t === 'hash' ? 'accent' : t === 'list' ? 'info' : t === 'set' || t === 'zset' ? 'warn' : t === 'none' ? 'danger' : 'muted'
+}
+
+function RedisView({ serverId, st, summary, reloadStatus }: { serverId: string; st: DbEngineStatus; summary: DbStatusSummary; reloadStatus: () => Promise<void> }): React.JSX.Element {
+  const [section, setSection] = useState<RedisSection>('overview')
+  const [credsOpen, setCredsOpen] = useState(false)
+  if (!st.installed) return <RedisInstallPanel serverId={serverId} summary={summary} />
+  const openCreds = (): void => setCredsOpen(true)
+  const usable = st.running && st.clientAvailable && st.authOk === true
+  const sections: { id: RedisSection; label: string; count?: number }[] = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'keys', label: 'Keys', count: st.redis?.totalKeys },
+    { id: 'config', label: 'Config' },
+    { id: 'tools', label: 'Tools' }
+  ]
+  return (
+    <div className="flex flex-col gap-4">
+      <Tabs tabs={sections} value={section} onChange={setSection} />
+      {section !== 'overview' && !st.running && <Callout kind="warn">Redis is not running. Start it from the Overview section.</Callout>}
+      {section !== 'overview' && section !== 'config' && st.running && st.authOk === false && <DbErrorBox error={new ApiError(st.authError ?? 'Admin connection failed', 'DB_AUTH')} onRetry={() => void reloadStatus()} onCredentials={openCreds} />}
+      {section === 'overview' && <RedisOverview serverId={serverId} st={st} reload={reloadStatus} onCredentials={openCreds} />}
+      {section === 'keys' && usable && <RedisKeys serverId={serverId} st={st} onCredentials={openCreds} />}
+      {section === 'config' && <RedisConfigCard serverId={serverId} st={st} reload={reloadStatus} />}
+      {section === 'tools' && usable && <RedisTools serverId={serverId} st={st} reload={reloadStatus} onCredentials={openCreds} />}
+      {credsOpen && (
+        <CredentialsModal
+          serverId={serverId}
+          engine="redis"
+          onClose={() => setCredsOpen(false)}
+          onSaved={() => {
+            setCredsOpen(false)
+            void reloadStatus()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function RedisInstallPanel({ serverId, summary }: { serverId: string; summary: DbStatusSummary }): React.JSX.Element {
+  const { run, busy } = useAction()
+  const pm = summary.os.pkgManager
+  const pkg = pm === 'apt' ? 'redis-server' : 'redis'
+  const supported = ['apt', 'dnf', 'yum', 'zypper', 'apk', 'pacman'].includes(pm)
+  const install = async (): Promise<void> => {
+    const id = await run(() => api.call<string>('db:install', serverId, 'redis'))
+    if (id) toastInfo('Installing Redis…', 'Follow the progress in the Tasks drawer. The service is enabled and started afterwards.')
+  }
+  return (
+    <Card>
+      <EmptyState
+        icon={<Database />}
+        title="Redis is not installed"
+        description={`Installs the ${pkg} package from the distribution's repositories (${summary.os.prettyName}), then enables and starts the service. Redis listens on 127.0.0.1:6379 without a password by default; protected mode keeps remote clients out until you set one in the Config section.`}
+        action={
+          <Button variant="primary" icon={<Download size={13} />} loading={busy} disabled={!supported} onClick={install} title={supported ? undefined : 'Unsupported package manager'}>
+            Install Redis
+          </Button>
+        }
+      />
+      {!supported && (
+        <div className="px-6 pb-4">
+          <Callout kind="danger">The package manager of {summary.os.prettyName} is not supported for automatic installation.</Callout>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function RedisOverview({ serverId, st, reload, onCredentials }: { serverId: string; st: DbEngineStatus; reload: () => Promise<void>; onCredentials: () => void }): React.JSX.Element {
+  const { run, busy } = useAction()
+  const ri = st.redis
+  const svc = async (action: 'start' | 'stop' | 'restart' | 'enable' | 'disable'): Promise<void> => {
+    if (action === 'stop' && !(await confirm({ title: 'Stop Redis', message: 'Applications using Redis will lose their connections. Unsaved changes since the last snapshot are written on shutdown (SAVE) unless persistence is disabled.', danger: true, confirmLabel: 'Stop' }))) return
+    await run(() => api.call('db:service', serverId, 'redis', action), { success: `Redis: ${action}` })
+    await reload()
+  }
+  const remove = async (): Promise<void> => {
+    if (!(await confirm({ title: 'Remove Redis', message: <>Stop the service and uninstall the Redis packages. The data directory ({ri?.dir ?? '/var/lib/redis'}) and the config file are kept.</>, danger: true, confirmLabel: 'Remove Redis', typeToConfirm: 'remove' }))) return
+    const id = await run(() => api.call<string>('db:redis:remove', serverId))
+    if (id) toastInfo('Removing Redis…', 'Follow the progress in the Tasks drawer.')
+  }
+  const memPct = ri?.maxmemory && ri.usedMemory !== undefined ? Math.min(100, Math.round((ri.usedMemory / ri.maxmemory) * 100)) : undefined
+  const hitRate = ri && (ri.keyspaceHits ?? 0) + (ri.keyspaceMisses ?? 0) > 0 ? Math.round(((ri.keyspaceHits ?? 0) / ((ri.keyspaceHits ?? 0) + (ri.keyspaceMisses ?? 0))) * 100) : undefined
+  const remoteBind = !!ri && !/^(127\.0\.0\.1|-?::1|localhost)(\s|$)/.test(ri.bind) && !(ri.port === 0 && ri.unixSocket)
+  const aofOn = ri ? (ri.aofEnabled ?? ri.appendonly) : false
+  const rows: [React.ReactNode, React.ReactNode][] = [
+    ['Version', st.version ?? '—'],
+    [
+      'Status',
+      <span className="flex items-center gap-2">
+        <Badge color={st.running ? 'ok' : 'danger'}>{st.running ? 'running' : 'stopped'}</Badge>
+        <Badge color={st.enabled ? 'ok' : 'muted'}>{st.enabled ? 'enabled at boot' : 'not enabled'}</Badge>
+        {st.unit && <span className="text-dim text-xs font-mono">{st.unit}.service</span>}
+      </span>
+    ],
+    ['Config file', <span className="font-mono text-xs">{ri?.configFile ?? '—'}</span>],
+    [
+      'Data directory',
+      <span className="font-mono text-xs">
+        {ri?.dir ?? '—'}
+        {ri?.dbfilename ? ` / ${ri.dbfilename}` : ''}
+      </span>
+    ],
+    ['Listening', <span className="font-mono text-xs">{ri?.port === 0 && ri.unixSocket ? `unix:${ri.unixSocket}` : `${ri?.bind ?? '—'} port ${ri?.port ?? '—'}`}</span>],
+    ['Password', ri ? ri.passwordSet ? <Badge color="ok">requirepass set</Badge> : <Badge color={remoteBind ? 'warn' : 'muted'}>none</Badge> : '—'],
+    ['Protected mode', ri ? ri.protectedMode ? 'yes' : <span className="text-warn-fg">no</span> : '—'],
+    [
+      'Memory',
+      ri?.usedMemory !== undefined ? (
+        <span>
+          {fmtBytes(ri.usedMemory)} used · peak {fmtBytes(ri.usedMemoryPeak)} · RSS {fmtBytes(ri.usedMemoryRss)} · limit {ri.maxmemory ? fmtBytes(ri.maxmemory) : 'none'} ({ri.maxmemoryPolicy})
+        </span>
+      ) : (
+        `limit ${ri?.maxmemoryConfig === '0' ? 'none' : (ri?.maxmemoryConfig ?? '—')} (${ri?.maxmemoryPolicy ?? '—'})`
+      )
+    ],
+    [
+      'Persistence',
+      ri ? (
+        <span>
+          {ri.save === '' ? (
+            <span className="text-warn-fg">RDB snapshots disabled</span>
+          ) : (
+            <>
+              RDB <span className="font-mono text-xs">save {ri.save ?? 'default'}</span>
+            </>
+          )}
+          {' · '}AOF {aofOn ? <span className="text-ok-fg">on</span> : 'off'}
+        </span>
+      ) : (
+        '—'
+      )
+    ],
+    [
+      'Last RDB save',
+      ri?.rdbLastSaveTime ? (
+        <span>
+          {fmtDate(ri.rdbLastSaveTime * 1000)} · {ri.rdbChangesSinceSave ?? 0} change(s) since{ri.rdbBgsaveInProgress ? ' · saving now' : ''}
+          {ri.rdbLastBgsaveStatus && ri.rdbLastBgsaveStatus !== 'ok' ? <span className="text-danger-fg"> · last status {ri.rdbLastBgsaveStatus}</span> : ''}
+        </span>
+      ) : (
+        '—'
+      )
+    ],
+    ['Clients', ri?.connectedClients !== undefined ? `${ri.connectedClients} connected · ${ri.blockedClients ?? 0} blocked · ${ri.totalConnections ?? 0} total · ${ri.rejectedConnections ?? 0} rejected` : '—'],
+    ['Keyspace', ri?.keyspace?.length ? <span className="font-mono text-xs">{ri.keyspace.map((d) => `db${d.db}: ${d.keys.toLocaleString()} keys (${d.expires.toLocaleString()} with TTL)`).join(' · ')}</span> : ri?.totalKeys === 0 ? 'empty' : '—'],
+    ['Stats', ri?.totalCommands !== undefined ? `${ri.totalCommands.toLocaleString()} commands · ${ri.opsPerSec ?? 0} ops/s · hit rate ${hitRate !== undefined ? hitRate + ' %' : '—'} · ${ri.evictedKeys ?? 0} evicted · ${ri.expiredKeys ?? 0} expired` : '—'],
+    ['Admin access', st.authOk === undefined ? '—' : st.authOk ? <span className="text-ok-fg">{st.usingCredentials ? 'password (stored credentials)' : 'no password required'}</span> : <span className="text-warn-fg">{ri?.passwordSet && !st.usingCredentials ? 'password required' : 'failed'}</span>]
+  ]
+  for (const [k, v] of Object.entries(st.details ?? {})) if (v && k !== 'persistence' && k !== 'configFile') rows.push([k.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/^./, (c) => c.toUpperCase()), <span className="font-mono text-xs">{v}</span>])
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
+        <Stat label="Service" value={st.running ? 'Running' : 'Stopped'} sub={st.enabled ? 'starts at boot' : 'manual start'} color={st.running ? 'bg-ok' : 'bg-danger'} bar={st.running ? 100 : 0} />
+        <Stat label="Memory used" value={fmtBytes(ri?.usedMemory)} sub={ri?.maxmemory ? `of ${fmtBytes(ri.maxmemory)} · ${ri.maxmemoryPolicy}` : `peak ${fmtBytes(ri?.usedMemoryPeak)} · no limit`} bar={memPct} />
+        <Stat label="Keys" value={ri?.totalKeys !== undefined ? ri.totalKeys.toLocaleString() : '—'} sub={ri?.keyspace?.length ? `${ri.keyspace.length} database(s) in use` : 'no keys'} />
+        <Stat label="Clients" value={ri?.connectedClients ?? '—'} sub={ri?.uptimeSec !== undefined ? `up ${fmtUptime(ri.uptimeSec)} · ${ri.opsPerSec ?? 0} ops/s` : undefined} />
+      </div>
+      {st.authOk === false && <DbErrorBox error={new ApiError(st.authError ?? 'Admin connection failed', 'DB_AUTH')} onRetry={() => void reload()} onCredentials={onCredentials} />}
+      {!st.clientAvailable && <Callout kind="warn">The admin client (redis-cli) is not installed, so Redis cannot be managed from here.</Callout>}
+      {ri && remoteBind && !ri.passwordSet && (
+        <Callout kind="warn">
+          Redis listens on <code>{ri.bind}</code> without a password. {ri.protectedMode ? 'Protected mode is refusing remote clients; set a password in the Config section to allow them safely.' : 'Protected mode is off, so anyone who can reach the port has full access. Set a password in the Config section.'}
+        </Callout>
+      )}
+      {ri && st.running && st.authOk && ri.save === '' && !aofOn && (
+        <Callout>
+          Persistence is disabled (no <code>save</code> rules, AOF off): data lives in memory only and is lost on restart.
+        </Callout>
+      )}
+      <EnginePackageUpdate serverId={serverId} engine="redis" unit={st.unit} />
+      <Card
+        title="Service"
+        actions={
+          <>
+            {st.running ? (
+              <>
+                <Button size="xs" icon={<RotateCw size={11} />} loading={busy} onClick={() => svc('restart')}>
+                  Restart
+                </Button>
+                <Button size="xs" variant="danger" icon={<Square size={11} />} loading={busy} onClick={() => svc('stop')}>
+                  Stop
+                </Button>
+              </>
+            ) : (
+              <Button size="xs" variant="primary" icon={<Play size={11} />} loading={busy} onClick={() => svc('start')}>
+                Start
+              </Button>
+            )}
+            <Button size="xs" icon={<Power size={11} />} loading={busy} onClick={() => svc(st.enabled ? 'disable' : 'enable')}>
+              {st.enabled ? 'Disable at boot' : 'Enable at boot'}
+            </Button>
+            <Button size="xs" icon={<KeyRound size={11} />} onClick={onCredentials}>
+              Admin credentials
+            </Button>
+            <Button size="xs" variant="ghost" className="text-danger-fg" icon={<Trash2 size={11} />} loading={busy} onClick={remove}>
+              Remove Redis
+            </Button>
+          </>
+        }
+      >
+        <KV rows={rows} />
+      </Card>
+    </div>
+  )
+}
+
+/* ---- Keys ---- */
+
+function RedisKeys({ serverId, st, onCredentials }: { serverId: string; st: DbEngineStatus; onCredentials: () => void }): React.JSX.Element {
+  const [db, setDb] = useState(0)
+  const [pattern, setPattern] = useState('*')
+  const [patternApplied, setPatternApplied] = useState('*')
+  const [count, setCount] = useState(100)
+  const [cursor, setCursor] = useState('0')
+  const [stack, setStack] = useState<string[]>([])
+  const [open, setOpen] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const { run } = useAction()
+  const scan = useAsync(() => api.call<RedisScanResult>('db:redis:scan', serverId, db, patternApplied, cursor, count), [serverId, db, patternApplied, cursor, count])
+  const data = scan.data
+  const reset = (): void => {
+    setCursor('0')
+    setStack([])
+  }
+  const apply = (): void => {
+    setPatternApplied(pattern.trim() || '*')
+    reset()
+  }
+  const del = async (k: RedisKey): Promise<void> => {
+    if (!(await confirm({ title: 'Delete key', message: <>Delete <b className="font-mono break-all">{k.key}</b> ({k.type}) from db{db}?</>, danger: true, confirmLabel: 'Delete key' }))) return
+    await run(() => api.call('db:redis:deleteKey', serverId, db, k.key), { success: 'Key deleted' })
+    await scan.reload()
+  }
+  const dbsInUse = new Map((st.redis?.keyspace ?? []).map((d) => [d.db, d.keys]))
+  const columns: Column<RedisKey>[] = [
+    { key: 'key', header: 'Key', render: (k) => <span className="font-mono text-xs break-all">{k.key}</span>, sortValue: (k) => k.key },
+    { key: 'type', header: 'Type', render: (k) => <Badge color={redisTypeColor(k.type)}>{k.type}</Badge>, sortValue: (k) => k.type, width: '90px' },
+    { key: 'ttl', header: 'TTL', render: (k) => <span className="text-xs tabular-nums">{fmtTtl(k.ttl)}</span>, sortValue: (k) => k.ttl, width: '120px' },
+    { key: 'size', header: 'Size', align: 'right', render: (k) => <span className="text-xs text-muted">{k.sizeBytes !== undefined ? fmtBytes(k.sizeBytes, 0) : '—'}</span>, sortValue: (k) => k.sizeBytes ?? -1, width: '90px' },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      width: '150px',
+      render: (k) => (
+        <div className="flex items-center justify-end gap-1">
+          <Button size="xs" variant="ghost" icon={<Search size={11} />} onClick={() => setOpen(k.key)}>
+            View
+          </Button>
+          <Button size="xs" variant="ghost" className="text-danger-fg" icon={<Trash2 size={11} />} onClick={() => del(k)}>
+            Delete
+          </Button>
+        </div>
+      )
+    }
+  ]
+  return (
+    <>
+      <Card
+        flush
+        title={`Keys${data ? ` · db${db}: ${data.dbSize.toLocaleString()} total` : ''}`}
+        actions={
+          <>
+            <Select
+              value={String(db)}
+              onChange={(e) => {
+                setDb(Number(e.target.value))
+                reset()
+              }}
+              className="h-7 text-xs w-36"
+            >
+              {REDIS_DBS.map((n) => (
+                <option key={n} value={n}>
+                  db{n}
+                  {dbsInUse.has(n) ? ` (${dbsInUse.get(n)?.toLocaleString()} keys)` : ''}
+                </option>
+              ))}
+            </Select>
+            <Input value={pattern} onChange={(e) => setPattern(e.target.value)} placeholder="MATCH pattern, e.g. user:*" mono className="h-7 text-xs w-56" onKeyDown={(e) => e.key === 'Enter' && apply()} />
+            <Button size="xs" icon={<Search size={11} />} onClick={apply}>
+              Scan
+            </Button>
+            <Select
+              value={String(count)}
+              onChange={(e) => {
+                setCount(Number(e.target.value))
+                reset()
+              }}
+              className="h-7 text-xs w-28"
+            >
+              {[50, 100, 250, 500].map((n) => (
+                <option key={n} value={n}>
+                  {n} / page
+                </option>
+              ))}
+            </Select>
+            <Button size="xs" variant="ghost" icon={<RefreshCw size={11} />} onClick={() => void scan.reload()} title="Refresh" />
+            <Button size="xs" variant="primary" icon={<Plus size={11} />} onClick={() => setAdding(true)}>
+              Add key
+            </Button>
+          </>
+        }
+      >
+        {scan.error ? (
+          <div className="p-4">
+            <DbErrorBox error={scan.error} onRetry={() => void scan.reload()} onCredentials={onCredentials} />
+          </div>
+        ) : scan.loading && !data ? (
+          <Loading />
+        ) : (
+          <Table columns={columns} rows={data?.keys ?? []} rowKey={(k) => k.key} dense empty={patternApplied === '*' ? 'No keys in this database' : `No keys match ${patternApplied} on this page — try Next, SCAN pages are approximate`} onRowClick={(k) => setOpen(k.key)} />
+        )}
+        <div className="flex items-center gap-2 px-3 h-10 border-t border-border text-xs text-muted">
+          {scan.loading && <Spinner size={12} />}
+          <span>
+            {data ? `${data.keys.length} key(s) on this page` : '—'} · pattern <span className="font-mono">{patternApplied}</span> · SCAN COUNT {count} (pages are approximate, sizes from MEMORY USAGE)
+          </span>
+          <div className="flex-1" />
+          <Button
+            size="xs"
+            variant="ghost"
+            icon={<ChevronLeft size={12} />}
+            disabled={!stack.length}
+            onClick={() => {
+              const prev = stack[stack.length - 1]
+              setStack(stack.slice(0, -1))
+              setCursor(prev ?? '0')
+            }}
+          >
+            Prev
+          </Button>
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={!data || data.cursor === '0'}
+            onClick={() => {
+              if (!data) return
+              setStack([...stack, cursor])
+              setCursor(data.cursor)
+            }}
+          >
+            Next <ChevronRight size={12} />
+          </Button>
+        </div>
+      </Card>
+      {open !== null && <RedisKeyModal serverId={serverId} db={db} keyName={open} onClose={() => setOpen(null)} onChanged={() => void scan.reload()} />}
+      {adding && (
+        <RedisAddKeyModal
+          serverId={serverId}
+          db={db}
+          onClose={() => setAdding(false)}
+          onCreated={() => {
+            setAdding(false)
+            void scan.reload()
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+function RedisKeyModal({ serverId, db, keyName, onClose, onChanged }: { serverId: string; db: number; keyName: string; onClose: () => void; onChanged: () => void }): React.JSX.Element {
+  const val = useAsync(() => api.call<RedisKeyValue>('db:redis:key', serverId, db, keyName), [serverId, db, keyName])
+  const [ttl, setTtl] = useState('')
+  const { run, busy } = useAction()
+  const v = val.data
+  const setExpire = async (persist: boolean): Promise<void> => {
+    const n = Number(ttl)
+    if (!persist && (!Number.isInteger(n) || n < 1)) return
+    await run(() => api.call('db:redis:expire', serverId, db, keyName, persist ? null : n), { success: persist ? 'Expiry removed' : `TTL set to ${n}s` })
+    await val.reload()
+    onChanged()
+  }
+  const del = async (): Promise<void> => {
+    if (!(await confirm({ title: 'Delete key', message: <>Delete <b className="font-mono break-all">{keyName}</b> from db{db}?</>, danger: true, confirmLabel: 'Delete key' }))) return
+    const ok = await run(() => api.call('db:redis:deleteKey', serverId, db, keyName).then(() => true), { success: 'Key deleted' })
+    if (ok) {
+      onChanged()
+      onClose()
+    }
+  }
+  const paired = v?.type === 'hash' || v?.type === 'zset' || v?.type === 'stream'
+  const pairs: [string, string][] = []
+  if (paired && v?.items) for (let i = 0; i + 1 < v.items.length; i += 2) pairs.push([v.items[i], v.items[i + 1]])
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      width="max-w-3xl"
+      title={
+        <span className="flex items-center gap-2 min-w-0">
+          <span className="font-mono text-sm truncate">{keyName}</span>
+          {v && <Badge color={redisTypeColor(v.type)}>{v.type}</Badge>}
+          <span className="text-dim text-xs">db{db}</span>
+        </span>
+      }
+      footer={
+        <>
+          <Button variant="danger" icon={<Trash2 size={12} />} loading={busy} onClick={del} disabled={!v || v.type === 'none'}>
+            Delete key
+          </Button>
+          <div className="flex-1" />
+          <Button onClick={onClose}>Close</Button>
+        </>
+      }
+    >
+      {val.error ? (
+        <ErrorBox error={val.error} onRetry={() => void val.reload()} />
+      ) : !v ? (
+        <Loading />
+      ) : v.type === 'none' ? (
+        <Callout kind="warn">This key no longer exists (expired or deleted).</Callout>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <KV
+            rows={[
+              [
+                'TTL',
+                <span className="flex items-center gap-2">
+                  {fmtTtl(v.ttl)}
+                  <Input type="number" value={ttl} onChange={(e) => setTtl(e.target.value)} placeholder="seconds" mono className="h-7 text-xs w-28" />
+                  <Button size="xs" loading={busy} disabled={!Number.isInteger(Number(ttl)) || Number(ttl) < 1} onClick={() => setExpire(false)}>
+                    Set TTL
+                  </Button>
+                  {v.ttl >= 0 && (
+                    <Button size="xs" variant="ghost" loading={busy} onClick={() => setExpire(true)}>
+                      Persist
+                    </Button>
+                  )}
+                </span>
+              ],
+              ['Size', v.sizeBytes !== undefined ? `${fmtBytes(v.sizeBytes)} (MEMORY USAGE)` : '—'],
+              [v.type === 'string' ? 'Length' : 'Elements', v.length !== undefined ? v.length.toLocaleString() : '—']
+            ]}
+          />
+          {v.truncated && <Callout>Showing the first {v.type === 'string' ? '64 KB' : `${REDIS_KEY_ITEMS_MAX} elements`} only.</Callout>}
+          {v.type === 'string' && <Pre maxH="max-h-[45vh]">{v.value ?? ''}</Pre>}
+          {(v.type === 'list' || v.type === 'set') && (
+            <div className="max-h-[45vh] overflow-auto border border-border rounded-md">
+              <table className="text-xs min-w-full">
+                <tbody className="font-mono">
+                  {(v.items ?? []).map((it, i) => (
+                    <tr key={i} className="border-b border-border/60">
+                      <td className="px-2 py-1 text-dim w-12 text-right tabular-nums">{i}</td>
+                      <td className="px-2 py-1 whitespace-pre-wrap break-all">{it}</td>
+                    </tr>
+                  ))}
+                  {!(v.items ?? []).length && (
+                    <tr>
+                      <td className="text-center text-muted py-6 font-sans">Empty</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {paired && (
+            <div className="max-h-[45vh] overflow-auto border border-border rounded-md">
+              <table className="text-xs min-w-full">
+                <thead className="sticky top-0 bg-panel text-muted text-left">
+                  <tr>
+                    <th className="px-2 py-1.5 border-b border-border font-medium">{v.type === 'hash' ? 'Field' : v.type === 'zset' ? 'Member' : 'ID'}</th>
+                    <th className="px-2 py-1.5 border-b border-border font-medium">{v.type === 'hash' ? 'Value' : v.type === 'zset' ? 'Score' : 'Fields'}</th>
+                  </tr>
+                </thead>
+                <tbody className="font-mono">
+                  {pairs.map(([a, b], i) => (
+                    <tr key={i} className="border-b border-border/60">
+                      <td className="px-2 py-1 whitespace-pre-wrap break-all align-top max-w-[260px]">{a}</td>
+                      <td className="px-2 py-1 whitespace-pre-wrap break-all align-top">{b}</td>
+                    </tr>
+                  ))}
+                  {!pairs.length && (
+                    <tr>
+                      <td colSpan={2} className="text-center text-muted py-6 font-sans">
+                        Empty
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!['string', 'list', 'set', 'hash', 'zset', 'stream'].includes(v.type) && (
+            <Callout>
+              Values of type <code>{v.type}</code> cannot be displayed here; use the command console in Tools.
+            </Callout>
+          )}
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+function RedisAddKeyModal({ serverId, db, onClose, onCreated }: { serverId: string; db: number; onClose: () => void; onCreated: () => void }): React.JSX.Element {
+  const [key, setKey] = useState('')
+  const [value, setValue] = useState('')
+  const [ttl, setTtl] = useState('')
+  const { run, busy } = useAction()
+  const ttlOk = ttl === '' || (Number.isInteger(Number(ttl)) && Number(ttl) >= 1)
+  const valid = key.length > 0 && ttlOk
+  const create = async (): Promise<void> => {
+    const ok = await run(() => api.call('db:redis:setKey', serverId, db, key, value, ttl === '' ? undefined : Number(ttl)).then(() => true), { success: `Set ${key}` })
+    if (ok) onCreated()
+  }
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Add string key · db${db}`}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={busy} disabled={!valid} onClick={create}>
+            SET
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <Field label="Key" hint="An existing key of any type with this name is overwritten.">
+          <Input value={key} onChange={(e) => setKey(e.target.value)} mono autoFocus />
+        </Field>
+        <Field label="Value">
+          <TextArea value={value} onChange={(e) => setValue(e.target.value)} mono rows={4} spellCheck={false} />
+        </Field>
+        <Field label="TTL (seconds, optional)" hint={ttlOk ? 'Leave empty for no expiry.' : 'Enter a positive whole number of seconds.'}>
+          <Input type="number" value={ttl} onChange={(e) => setTtl(e.target.value)} mono className="w-40" />
+        </Field>
+      </div>
+    </Modal>
+  )
+}
+
+/* ---- Config ---- */
+
+const REDIS_BIND_LOCAL = '127.0.0.1 -::1'
+const REDIS_BIND_ALL = '0.0.0.0 -::*'
+const REDIS_PW_BAD = /[\s"'\\]/
+const REDIS_MAXMEM_RE = /^\d{1,15}(b|k|kb|m|mb|g|gb)?$/
+const REDIS_BIND_RE = /^-?(\*|[0-9A-Za-z.:*]{1,64})(\s+-?(\*|[0-9A-Za-z.:*]{1,64}))*$/
+
+function redisBindPreset(b: string): 'local' | 'all' | 'custom' {
+  const t = b.trim()
+  return /^127\.0\.0\.1(\s+-?::1)?$/.test(t) ? 'local' : /^(0\.0\.0\.0|\*)(\s+-?::\*?)?$/.test(t) ? 'all' : 'custom'
+}
+
+function RedisConfigCard({ serverId, st, reload }: { serverId: string; st: DbEngineStatus; reload: () => Promise<void> }): React.JSX.Element {
+  const ri = st.redis
+  const curBind = ri?.bind ?? REDIS_BIND_LOCAL
+  const curPort = ri?.port || 6379
+  const curMax = (ri?.maxmemoryConfig ?? '0').toLowerCase()
+  const curPolicy = ri?.maxmemoryPolicy ?? 'noeviction'
+  const curAof = ri?.appendonly ?? false
+  const curPw = ri?.passwordSet ?? false
+  const [bindMode, setBindMode] = useState<'local' | 'all' | 'custom'>(redisBindPreset(curBind))
+  const [bind, setBind] = useState(curBind)
+  const [port, setPort] = useState(String(curPort))
+  const [pwOn, setPwOn] = useState(curPw)
+  const [pw, setPw] = useState('')
+  const [showPw, setShowPw] = useState(false)
+  const [max, setMax] = useState(curMax === '0' ? '' : curMax)
+  const [policy, setPolicy] = useState(curPolicy)
+  const [aof, setAof] = useState(curAof)
+  const [result, setResult] = useState<{ file: string; backup: string } | null>(null)
+  const { run, busy } = useAction()
+  useEffect(() => {
+    setBindMode(redisBindPreset(curBind))
+    setBind(curBind)
+    setPort(String(curPort))
+    setPwOn(curPw)
+    setPw('')
+    setMax(curMax === '0' ? '' : curMax)
+    setPolicy(curPolicy)
+    setAof(curAof)
+  }, [curBind, curPort, curPw, curMax, curPolicy, curAof])
+
+  const effBind = bindMode === 'local' ? REDIS_BIND_LOCAL : bindMode === 'all' ? REDIS_BIND_ALL : bind.trim()
+  const bindChanged = bindMode === 'custom' ? effBind !== curBind.trim() : bindMode !== redisBindPreset(curBind)
+  const portN = Number(port)
+  const maxN = max.trim().toLowerCase() || '0'
+  const patch: RedisConfigPatch = {}
+  if (bindChanged) patch.bind = effBind
+  if (portN !== curPort) patch.port = portN
+  if (!pwOn && curPw) patch.requirepass = ''
+  if (pwOn && pw) patch.requirepass = pw
+  if (maxN !== curMax) patch.maxmemory = maxN
+  if (policy !== curPolicy) patch.maxmemoryPolicy = policy
+  if (aof !== curAof) patch.appendonly = aof
+  const dirty = Object.keys(patch).length > 0
+  const pwFormatOk = !pw || (pw.length >= 8 && !REDIS_PW_BAD.test(pw))
+  const pwValid = !pwOn || curPw || (pw.length >= 8 && !REDIS_PW_BAD.test(pw))
+  const valid = Number.isInteger(portN) && portN >= 1 && portN <= 65535 && REDIS_MAXMEM_RE.test(maxN) && (bindMode !== 'custom' || REDIS_BIND_RE.test(effBind)) && pwValid && pwFormatOk
+  const exposed = bindMode !== 'local' && !pwOn
+  const apply = async (): Promise<void> => {
+    const list = [
+      patch.bind !== undefined ? `bind → ${patch.bind}` : null,
+      patch.port !== undefined ? `port → ${patch.port}` : null,
+      patch.requirepass !== undefined ? (patch.requirepass === '' ? 'requirepass → cleared' : 'requirepass → new password') : null,
+      patch.maxmemory !== undefined ? `maxmemory → ${patch.maxmemory === '0' ? 'unlimited' : patch.maxmemory}` : null,
+      patch.maxmemoryPolicy !== undefined ? `maxmemory-policy → ${patch.maxmemoryPolicy}` : null,
+      patch.appendonly !== undefined ? `appendonly → ${patch.appendonly ? 'yes' : 'no'}` : null
+    ].filter(Boolean)
+    const ok = await confirm({
+      title: 'Apply Redis configuration',
+      message: (
+        <>
+          {list.join(', ')}. The config file is backed up first, then <b>Redis is restarted</b> (clients are disconnected). If the service does not come back, the previous file is restored.
+          {exposed && <div className="mt-2 text-warn-fg">Binding to a non-loopback address without a password exposes Redis to the network (protected mode permitting).</div>}
+        </>
+      ),
+      danger: true,
+      confirmLabel: 'Apply & restart'
+    })
+    if (!ok) return
+    const r = await run(() => api.call<{ file: string; backup: string }>('db:redis:configure', serverId, patch), { success: 'Configuration applied, Redis restarted' })
+    if (r) {
+      setResult(r)
+      setPw('')
+      await reload()
+    }
+  }
+  const pwHint = !pwOn ? 'No password: only loopback / protected-mode clients can connect.' : curPw && !pw ? 'A password is set. Enter a new one to change it; it is kept in memory for this session after the restart.' : pwFormatOk ? 'At least 8 characters, no spaces, quotes or backslashes. Kept in memory for this session after the restart.' : 'At least 8 characters without spaces, quotes or backslashes.'
+  return (
+    <div className="flex flex-col gap-4">
+      <Card
+        title={
+          <span className="flex items-center gap-2">
+            <Settings size={13} /> Server configuration <span className="font-mono text-xs text-muted">{ri?.configFile ?? 'redis.conf'}</span>
+          </span>
+        }
+        actions={
+          <Button size="xs" variant="primary" disabled={!dirty || !valid} loading={busy} onClick={apply}>
+            Apply & restart
+          </Button>
+        }
+      >
+        <div className="grid grid-cols-6 gap-4">
+          <Field label="Bind address" className="col-span-3" hint={bindMode === 'local' ? 'Only local clients can connect (default).' : bindMode === 'all' ? 'All interfaces, IPv4 and IPv6 — set a password and firewall the port.' : 'Space-separated addresses; prefix with - to ignore a missing one (e.g. 10.0.0.5 -::1).'}>
+            <div className="flex gap-2">
+              <Select value={bindMode} onChange={(e) => setBindMode(e.target.value as 'local' | 'all' | 'custom')} className="w-44">
+                <option value="local">127.0.0.1 (local only)</option>
+                <option value="all">0.0.0.0 (all interfaces)</option>
+                <option value="custom">custom…</option>
+              </Select>
+              {bindMode === 'custom' && <Input value={bind} onChange={(e) => setBind(e.target.value)} mono className="flex-1" placeholder="10.0.0.5 127.0.0.1 -::1" />}
+            </div>
+          </Field>
+          <Field label="Port" className="col-span-1" hint="Default 6379.">
+            <Input type="number" value={port} onChange={(e) => setPort(e.target.value)} mono />
+          </Field>
+          <Field label="Append-only file" className="col-span-2" hint="appendonly yes — durable write log in addition to RDB snapshots.">
+            <div className="h-8 flex items-center">
+              <Checkbox checked={aof} onChange={setAof} label={aof ? 'AOF enabled' : 'AOF disabled'} />
+            </div>
+          </Field>
+          <Field label="Password (requirepass)" className="col-span-6" hint={pwHint}>
+            <div className="flex items-center gap-2">
+              <Checkbox checked={pwOn} onChange={setPwOn} label={<span className="text-xs">{pwOn ? 'Require a password' : 'No password'}</span>} />
+              {pwOn && (
+                <>
+                  <Input type={showPw ? 'text' : 'password'} value={pw} onChange={(e) => setPw(e.target.value)} mono autoComplete="off" placeholder={curPw ? '(unchanged)' : 'new password'} className="flex-1" />
+                  <Button onClick={() => setShowPw((s) => !s)}>{showPw ? 'Hide' : 'Show'}</Button>
+                  <Button
+                    onClick={() => {
+                      setPw(genPassword(24).replace(REDIS_PW_BAD, 'x'))
+                      setShowPw(true)
+                    }}
+                  >
+                    Generate
+                  </Button>
+                </>
+              )}
+            </div>
+          </Field>
+          <Field label="maxmemory" className="col-span-3" hint="e.g. 256mb or 2gb; empty = unlimited. When reached, the eviction policy decides what happens.">
+            <Input value={max} onChange={(e) => setMax(e.target.value)} mono placeholder="unlimited" />
+          </Field>
+          <Field label="maxmemory-policy" className="col-span-3" hint={policy === 'noeviction' ? 'Writes fail with OOM when the limit is reached (default).' : policy.startsWith('allkeys') ? 'Any key may be evicted — cache semantics.' : 'Only keys with a TTL are evicted.'}>
+            <Select value={policy} onChange={(e) => setPolicy(e.target.value)}>
+              {REDIS_MAXMEMORY_POLICIES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        {exposed && dirty && (
+          <div className="mt-3">
+            <Callout kind="warn">
+              Redis will listen on <code>{effBind}</code> without a password. Protected mode {ri?.protectedMode === false ? 'is off, so this exposes all data to the network' : 'will still refuse remote clients until a password is set'}.
+            </Callout>
+          </div>
+        )}
+        {result && (
+          <div className="mt-3 text-xs text-muted flex items-center gap-2">
+            <Save size={12} /> Written to <span className="font-mono text-text">{result.file}</span>; previous version saved as <span className="font-mono text-text">{result.backup}</span>.
+          </div>
+        )}
+      </Card>
+      <Callout>
+        Directives are replaced in place (other lines and comments are kept); missing ones are appended under a <code># Added by Central Server</code> marker. A timestamped backup <span className="font-mono">redis.conf.bak-…</span> is written next to the file before every change.
+      </Callout>
+    </div>
+  )
+}
+
+/* ---- Tools ---- */
+
+function RedisTools({ serverId, st, reload, onCredentials }: { serverId: string; st: DbEngineStatus; reload: () => Promise<void>; onCredentials: () => void }): React.JSX.Element {
+  const [db, setDb] = useState(0)
+  const [line, setLine] = useState('')
+  const [raw, setRaw] = useState(false)
+  const [out, setOut] = useState<{ output: string; ms: number; cmd: string } | null>(null)
+  const [error, setError] = useState<unknown>(null)
+  const [history, setHistory] = useState<string[]>([])
+  const [running, setRunning] = useState(false)
+  const { run, busy } = useAction()
+  const slow = useAsync(() => api.call<RedisSlowlogEntry[]>('db:redis:slowlog', serverId, 25), [serverId])
+  const clients = useAsync(() => api.call<RedisClient[]>('db:redis:clients', serverId), [serverId], { intervalMs: 10000 })
+  const ri = st.redis
+  const aofOn = ri ? (ri.aofEnabled ?? ri.appendonly) : false
+
+  const execute = async (cmd = line): Promise<void> => {
+    const q = cmd.trim()
+    if (!q || running) return
+    setRunning(true)
+    setError(null)
+    try {
+      const r = await api.call<{ output: string; ms: number }>('db:redis:command', serverId, db, q, raw)
+      setOut({ ...r, cmd: q })
+      setHistory((h) => [q, ...h.filter((x) => x !== q)].slice(0, 20))
+    } catch (e) {
+      setError(e)
+      setOut(null)
+    } finally {
+      setRunning(false)
+    }
+  }
+  const flush = async (all: boolean): Promise<void> => {
+    const keys = all ? ri?.totalKeys : ri?.keyspace?.find((d) => d.db === db)?.keys
+    const ok = await confirm({
+      title: all ? 'FLUSHALL — delete every key' : `FLUSHDB — empty db${db}`,
+      message: (
+        <>
+          {all ? 'All keys in all 16 databases' : <>All keys in <b className="font-mono">db{db}</b></>} will be deleted permanently{keys !== undefined ? ` (${keys.toLocaleString()} key(s) at the last refresh)` : ''}. There is no undo.
+        </>
+      ),
+      danger: true,
+      confirmLabel: all ? 'FLUSHALL' : 'FLUSHDB',
+      typeToConfirm: 'flush'
+    })
+    if (!ok) return
+    await run(() => api.call('db:redis:flush', serverId, all ? null : db), { success: all ? 'All databases flushed' : `db${db} flushed` })
+    await reload()
+  }
+  const bgsave = async (): Promise<void> => {
+    const r = await run(() => api.call<{ message: string; lastSave: number }>('db:redis:bgsave', serverId), { error: 'BGSAVE failed' })
+    if (r) {
+      toastInfo(r.message || 'Background saving started', `Last completed save: ${fmtDate(r.lastSave)}`)
+      setTimeout(() => void reload(), 2000)
+    }
+  }
+  const slowCols: Column<RedisSlowlogEntry>[] = [
+    { key: 'id', header: '#', render: (e) => <span className="text-xs text-dim tabular-nums">{e.id}</span>, sortValue: (e) => e.id, width: '60px' },
+    { key: 'time', header: 'When', render: (e) => <span className="text-xs text-muted">{fmtDate(e.time)}</span>, sortValue: (e) => e.time, width: '150px' },
+    { key: 'dur', header: 'Duration', align: 'right', render: (e) => <span className={cls('text-xs tabular-nums', e.durationUs >= 100000 ? 'text-danger-fg' : e.durationUs >= 10000 ? 'text-warn-fg' : '')}>{e.durationUs >= 1000 ? `${(e.durationUs / 1000).toFixed(1)} ms` : `${e.durationUs} µs`}</span>, sortValue: (e) => e.durationUs, width: '100px' },
+    { key: 'cmd', header: 'Command', render: (e) => <span className="font-mono text-xs break-all">{e.command}</span> },
+    { key: 'client', header: 'Client', render: (e) => <span className="text-xs text-muted font-mono">{[e.client, e.clientName].filter(Boolean).join(' ')}</span>, width: '180px' }
+  ]
+  const clientCols: Column<RedisClient>[] = [
+    { key: 'id', header: 'ID', render: (c) => <span className="text-xs text-dim tabular-nums">{c.id}</span>, sortValue: (c) => Number(c.id), width: '60px' },
+    { key: 'addr', header: 'Address', render: (c) => <span className="font-mono text-xs">{c.addr}</span>, sortValue: (c) => c.addr },
+    { key: 'name', header: 'Name / user', render: (c) => <span className="text-xs text-muted">{[c.name, c.user].filter(Boolean).join(' · ') || '—'}</span> },
+    { key: 'db', header: 'DB', align: 'right', render: (c) => <span className="text-xs">db{c.db}</span>, sortValue: (c) => c.db, width: '60px' },
+    { key: 'age', header: 'Age / idle', align: 'right', render: (c) => <span className="text-xs text-muted tabular-nums">{c.ageSec >= 60 ? fmtUptime(c.ageSec) : `${c.ageSec}s`} / {c.idleSec}s</span>, sortValue: (c) => c.idleSec, width: '120px' },
+    { key: 'cmd', header: 'Last command', render: (c) => <span className="font-mono text-xs">{c.cmd}</span>, width: '140px' },
+    { key: 'flags', header: 'Flags', render: (c) => <span className="font-mono text-xs text-dim">{c.flags}</span>, width: '70px' }
+  ]
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card
+        flush
+        title={
+          <span className="flex items-center gap-2">
+            <Terminal size={13} /> redis-cli
+          </span>
+        }
+        actions={
+          <>
+            <Select value={String(db)} onChange={(e) => setDb(Number(e.target.value))} className="h-7 text-xs w-24">
+              {REDIS_DBS.map((n) => (
+                <option key={n} value={n}>
+                  db{n}
+                </option>
+              ))}
+            </Select>
+            <Checkbox checked={raw} onChange={setRaw} label={<span className="text-xs text-muted">raw output</span>} />
+            <MenuButton size="xs" variant="ghost" icon={<History size={11} />} label="History" items={history.length ? history.map((h) => ({ label: <span className="font-mono text-xs truncate max-w-[480px] block">{h.slice(0, 120)}</span>, onClick: () => setLine(h) })) : [{ label: <span className="text-dim">No commands yet</span>, disabled: true }]} />
+            <Button size="xs" variant="primary" icon={<Play size={11} />} loading={running} onClick={() => void execute()} disabled={!line.trim()}>
+              Run <span className="opacity-60 font-normal">Enter</span>
+            </Button>
+          </>
+        }
+      >
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+          <span className="text-xs text-muted font-mono">{`${ri?.port ?? 6379}[${db}]>`}</span>
+          <Input
+            value={line}
+            onChange={(e) => setLine(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                void execute()
+              }
+            }}
+            mono
+            spellCheck={false}
+            placeholder='INFO memory · KEYS user:* · HGETALL user:1 · SET greeting "hello world" EX 60 · CONFIG GET maxmemory'
+            className="h-8 text-xs flex-1"
+          />
+        </div>
+        <div className="px-3 py-1.5 text-[11px] text-dim flex items-center gap-2">
+          One command per run; arguments are split like redis-cli does (double quotes with \n and \xHH escapes, single quotes). Each argument is passed separately, never through a shell. Nothing is blocked.
+          {out && <span className="ml-auto text-muted">{out.ms} ms</span>}
+        </div>
+        {error ? (
+          <div className="p-3">
+            <DbErrorBox error={error} onCredentials={onCredentials} />
+          </div>
+        ) : null}
+        {out && (
+          <Pre maxH="max-h-[40vh]" className="m-3">
+            {out.output}
+          </Pre>
+        )}
+      </Card>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Card
+          title={
+            <span className="flex items-center gap-2">
+              <HardDrive size={13} /> Persistence
+            </span>
+          }
+          actions={
+            <Button size="xs" icon={<Save size={11} />} loading={busy} onClick={bgsave} disabled={ri?.rdbBgsaveInProgress}>
+              BGSAVE now
+            </Button>
+          }
+        >
+          <KV
+            rows={[
+              ['RDB snapshots', ri?.save === '' ? <span className="text-warn-fg">disabled</span> : <span className="font-mono text-xs">save {ri?.save ?? 'default'}</span>],
+              ['Last save', ri?.rdbLastSaveTime ? fmtDate(ri.rdbLastSaveTime * 1000) : '—'],
+              ['Changes since', ri?.rdbChangesSinceSave !== undefined ? ri.rdbChangesSinceSave.toLocaleString() : '—'],
+              ['Background save', ri?.rdbBgsaveInProgress ? <Badge color="info">in progress</Badge> : <span>idle{ri?.rdbLastBgsaveStatus ? ` · last ${ri.rdbLastBgsaveStatus}` : ''}</span>],
+              ['AOF', aofOn ? <span className="text-ok-fg">enabled{ri?.aofRewriteInProgress ? ' · rewriting' : ''}</span> : 'disabled'],
+              ['Dump file', <span className="font-mono text-xs">{[ri?.dir, ri?.dbfilename ?? 'dump.rdb'].filter(Boolean).join('/')}</span>]
+            ]}
+          />
+        </Card>
+        <Card
+          title={
+            <span className="flex items-center gap-2 text-danger-fg">
+              <Eraser size={13} /> Danger zone
+            </span>
+          }
+        >
+          <div className="flex flex-col gap-3 text-xs text-muted">
+            <div>Flushing deletes keys immediately and cannot be undone. Run BGSAVE and copy the dump file first if you might need the data.</div>
+            <div className="flex items-center gap-2">
+              <Select value={String(db)} onChange={(e) => setDb(Number(e.target.value))} className="h-7 text-xs w-40">
+                {REDIS_DBS.map((n) => {
+                  const ks = ri?.keyspace?.find((d) => d.db === n)
+                  return (
+                    <option key={n} value={n}>
+                      db{n}
+                      {ks ? ` (${ks.keys.toLocaleString()} keys)` : ''}
+                    </option>
+                  )
+                })}
+              </Select>
+              <Button size="xs" variant="danger" icon={<Eraser size={11} />} loading={busy} onClick={() => flush(false)}>
+                FLUSHDB
+              </Button>
+              <div className="flex-1" />
+              <Button size="xs" variant="danger" icon={<Trash2 size={11} />} loading={busy} onClick={() => flush(true)}>
+                FLUSHALL
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <Card flush title="Slow log (SLOWLOG GET 25)" actions={<Button size="xs" variant="ghost" icon={<RefreshCw size={11} />} onClick={() => void slow.reload()} title="Refresh" />}>
+        {slow.error ? (
+          <div className="p-4">
+            <DbErrorBox error={slow.error} onRetry={() => void slow.reload()} onCredentials={onCredentials} />
+          </div>
+        ) : slow.loading && !slow.data ? (
+          <Loading />
+        ) : (
+          <Table columns={slowCols} rows={slow.data ?? []} rowKey={(e) => String(e.id)} dense empty="No slow commands recorded (slowlog-log-slower-than, default 10 ms)" initialSort={{ key: 'id', dir: 'desc' }} />
+        )}
+      </Card>
+
+      <Card flush title={`Connected clients${clients.data ? ` (${clients.data.length})` : ''}`} actions={<Button size="xs" variant="ghost" icon={<RefreshCw size={11} />} onClick={() => void clients.reload()} title="Refresh" />}>
+        {clients.error ? (
+          <div className="p-4">
+            <DbErrorBox error={clients.error} onRetry={() => void clients.reload()} onCredentials={onCredentials} />
+          </div>
+        ) : clients.loading && !clients.data ? (
+          <Loading />
+        ) : (
+          <Table columns={clientCols} rows={clients.data ?? []} rowKey={(c) => c.id} dense empty="No clients" initialSort={{ key: 'id', dir: 'asc' }} />
+        )}
+      </Card>
+    </div>
+  )
+}
+
+/** "Package: 10.11.6 → 10.11.8 · Update" row for the engine's distro packages. */
+function EnginePackageUpdate({ serverId, engine, unit }: { serverId: string; engine: DbEngine; unit?: string }): React.JSX.Element {
+  const pkgManager = useApp((s) => s.connections[serverId]?.os?.pkgManager)
+  const packages = enginePackages(engine, pkgManager)
+  if (!packages.length) return <></>
+  return (
+    <div className="flex items-center gap-2 text-xs text-muted">
+      <span>Package:</span>
+      <PackageUpdate serverId={serverId} packages={packages} restart={unit ? [unit] : undefined} label={DB_ENGINE_LABEL[engine]} />
     </div>
   )
 }

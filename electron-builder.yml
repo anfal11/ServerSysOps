@@ -9,6 +9,9 @@ files:
   - '!**/*.map'
 asarUnpack:
   - node_modules/ssh2/**
+extraResources:
+  - from: build/icon.png
+    to: icon.png
 win:
   target:
     - target: nsis

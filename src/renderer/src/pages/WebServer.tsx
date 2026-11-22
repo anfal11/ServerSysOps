@@ -23,6 +23,7 @@ import { api } from '@/lib/api'
 import { useApp } from '@/store/app'
 import { cls, fmtBytes } from '@/lib/format'
 import { Badge, Button, Callout, Card, Checkbox, EmptyState, ErrorBox, Field, Input, KV, Loading, Modal, Page, PageHeader, Pre, Select, Table, Tabs, TextArea, Toggle, confirm, useAction, useAsync, type Column } from '@/components/ui'
+import { PackageUpdate } from '@/components/PackageUpdate'
 import type { PhpFpmInfo, SslCert, SslStatus, WebDetectResult, WebLogResult, WebLogSummary, WebServerId, WebServerInfo, WebServiceAction, WebSite, WebSiteSpec, WebSiteType, WebTestResult } from '@shared/modules/webserver'
 
 type ManageTab = 'sites' | 'ssl' | 'logs'
@@ -41,6 +42,11 @@ export default function WebServer({ serverId }: PageProps): React.JSX.Element {
   const [testOut, setTestOut] = useState<{ name: string; result: WebTestResult } | null>(null)
   const [newSite, setNewSite] = useState(false)
   const tasks = useApp((s) => s.tasks)
+  const { run: runRefresh, busy: refreshing } = useAction()
+  const refreshPkgLists = async (): Promise<void> => {
+    const id = await runRefresh(() => api.call<string>('pkg:refresh', serverId))
+    if (id) toastStarted('Refresh package lists')
+  }
 
   // Refresh when a task for this server finishes (installs etc.).
   const doneCount = tasks.filter((t) => t.serverId === serverId && t.status !== 'running' && t.status !== 'queued').length
@@ -64,6 +70,9 @@ export default function WebServer({ serverId }: PageProps): React.JSX.Element {
                 New site
               </Button>
             )}
+            <Button variant="ghost" icon={<Download size={13} />} onClick={() => void refreshPkgLists()} loading={refreshing} title="Re-read the distribution repositories so available package updates are detected (apt-get update etc.)">
+              Refresh package lists
+            </Button>
             <Button icon={<RefreshCw size={13} />} onClick={() => void reload()} title="Refresh">
               Refresh
             </Button>
@@ -134,6 +143,24 @@ function SectionTitle({ children }: { children: React.ReactNode }): React.JSX.El
 /* Installed server card                                               */
 /* ------------------------------------------------------------------ */
 
+/** Distro package providing a detected web server (apache2 vs httpd follows the unit name the service detected). */
+function webPackage(srv: WebServerInfo): string {
+  switch (srv.id) {
+    case 'nginx':
+      return 'nginx'
+    case 'apache':
+      return srv.unit === 'httpd' ? 'httpd' : 'apache2'
+    case 'caddy':
+      return 'caddy'
+    case 'openlitespeed':
+      return 'openlitespeed'
+    case 'lighttpd':
+      return 'lighttpd'
+    default:
+      return srv.unit
+  }
+}
+
 function ServerCard({ serverId, srv, hasSystemd, onChanged, onTest }: { serverId: string; srv: WebServerInfo; hasSystemd: boolean; onChanged: () => Promise<void>; onTest: (r: WebTestResult) => void }): React.JSX.Element {
   const { run, busy } = useAction()
   const [acting, setActing] = useState<string | null>(null)
@@ -175,6 +202,13 @@ function ServerCard({ serverId, srv, hasSystemd, onChanged, onTest }: { serverId
       <div className="mt-3">
         <KV
           rows={[
+            [
+              'Package',
+              <span className="inline-flex items-center gap-2 min-w-0">
+                <span className="font-mono text-xs">{webPackage(srv)}</span>
+                <PackageUpdate serverId={serverId} packages={[webPackage(srv)]} restart={[srv.unit]} label={srv.name} />
+              </span>
+            ],
             ['Config', <span className="font-mono text-xs">{srv.configDir}</span>],
             ...(srv.sitesDir ? ([['Sites', <span className="font-mono text-xs">{srv.sitesDir}</span>]] as [React.ReactNode, React.ReactNode][]) : []),
             ['Logs', <span className="font-mono text-xs">{srv.logDir}</span>],
@@ -673,6 +707,12 @@ function NewSiteModal({ serverId, srv, onClose, onCreated }: { serverId: string;
                 <Callout kind="warn">No PHP-FPM socket was found in /run/php or /run/php-fpm. The site will fail to serve PHP until php-fpm is installed and running.</Callout>
               </>
             )}
+            {php.data?.units.map((u) => (
+              <div key={u.unit} className="flex items-center gap-2 mt-1.5 text-xs">
+                <span className="font-mono text-muted">{u.unit}</span>
+                <PackageUpdate serverId={serverId} packages={[u.unit]} restart={[u.unit]} label={u.unit} />
+              </div>
+            ))}
           </Field>
         )}
         <div className="col-span-6">
@@ -794,7 +834,17 @@ function SslTab({ serverId, srv, sites }: { serverId: string; srv: WebServerInfo
       >
         <KV
           rows={[
-            ['certbot', data.certbotInstalled ? <Badge color="ok">installed{data.certbotVersion ? ` v${data.certbotVersion}` : ''}</Badge> : <Badge color="muted">not installed</Badge>],
+            [
+              'certbot',
+              data.certbotInstalled ? (
+                <span className="inline-flex items-center gap-2">
+                  <Badge color="ok">installed{data.certbotVersion ? ` v${data.certbotVersion}` : ''}</Badge>
+                  <PackageUpdate serverId={serverId} packages={['certbot']} label="certbot" />
+                </span>
+              ) : (
+                <Badge color="muted">not installed</Badge>
+              )
+            ],
             ['Auto-renewal', data.renewalActive ? <Badge color="ok">{data.renewal ?? 'active'}</Badge> : data.certbotInstalled ? <Badge color="warn">no timer / cron found</Badge> : <span className="text-dim">—</span>],
             ['Certificates', <span>{data.certs.length}</span>]
           ]}

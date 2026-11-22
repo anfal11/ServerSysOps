@@ -1,6 +1,6 @@
 // Shared types for the Databases module (main <-> renderer).
 
-export type DbEngine = 'mysql' | 'postgres' | 'mongo' | 'mssql' | 'sqlite'
+export type DbEngine = 'mysql' | 'postgres' | 'mongo' | 'mssql' | 'redis' | 'sqlite'
 export type DbServiceAction = 'start' | 'stop' | 'restart' | 'enable' | 'disable'
 export type DbPrivileges = 'all' | 'readonly' | 'none'
 
@@ -42,14 +42,139 @@ export interface DbEngineStatus {
   needsInitdb?: boolean
   /** mssql: values from /var/opt/mssql/mssql.conf. */
   mssql?: MssqlSettings
+  /** redis: values from redis.conf and INFO. */
+  redis?: RedisInfo
   details?: Record<string, string>
 }
+
+export interface RedisKeyspaceDb {
+  db: number
+  keys: number
+  expires: number
+  avgTtlMs?: number
+}
+
+export interface RedisInfo {
+  /** Config file in use (/etc/redis/redis.conf or /etc/redis.conf). */
+  configFile?: string
+  /** `bind` directive as written in the config (default "127.0.0.1 -::1"). */
+  bind: string
+  port: number
+  unixSocket?: string
+  /** requirepass is set in the config file. */
+  passwordSet: boolean
+  protectedMode: boolean
+  /** maxmemory directive from the config (e.g. "256mb"; "0" = unlimited). */
+  maxmemoryConfig: string
+  maxmemoryPolicy: string
+  appendonly: boolean
+  /** `save` directive ("" = RDB snapshots disabled). */
+  save?: string
+  dir?: string
+  dbfilename?: string
+  // ---- from INFO (only when the admin connection worked) ----
+  usedMemory?: number
+  usedMemoryPeak?: number
+  usedMemoryRss?: number
+  maxmemory?: number
+  connectedClients?: number
+  blockedClients?: number
+  uptimeSec?: number
+  totalKeys?: number
+  keyspace?: RedisKeyspaceDb[]
+  aofEnabled?: boolean
+  rdbLastSaveTime?: number
+  rdbChangesSinceSave?: number
+  rdbBgsaveInProgress?: boolean
+  rdbLastBgsaveStatus?: string
+  aofRewriteInProgress?: boolean
+  role?: string
+  opsPerSec?: number
+  totalCommands?: number
+  keyspaceHits?: number
+  keyspaceMisses?: number
+  evictedKeys?: number
+  expiredKeys?: number
+  totalConnections?: number
+  rejectedConnections?: number
+  redisMode?: string
+  executable?: string
+}
+
+export type RedisKeyType = 'string' | 'hash' | 'list' | 'set' | 'zset' | 'stream' | 'none' | string
+
+export interface RedisKey {
+  key: string
+  type: RedisKeyType
+  /** Seconds; -1 = no expiry, -2 = key vanished. */
+  ttl: number
+  /** MEMORY USAGE in bytes (undefined when the server does not support it). */
+  sizeBytes?: number
+}
+
+export interface RedisScanResult {
+  cursor: string
+  keys: RedisKey[]
+  /** Keys in the selected database (DBSIZE). */
+  dbSize: number
+}
+
+export interface RedisKeyValue {
+  key: string
+  type: RedisKeyType
+  ttl: number
+  sizeBytes?: number
+  /** Number of elements (STRLEN for strings). */
+  length?: number
+  /** string: the value (truncated to 64 KB). */
+  value?: string
+  /** list / set: elements; hash / zset / stream: flat [field, value, field, value …]. First 200 elements. */
+  items?: string[]
+  truncated?: boolean
+}
+
+export interface RedisConfigPatch {
+  bind?: string
+  port?: number
+  /** '' clears requirepass. */
+  requirepass?: string
+  /** e.g. "256mb"; "0" or '' = unlimited. */
+  maxmemory?: string
+  maxmemoryPolicy?: string
+  appendonly?: boolean
+}
+
+export interface RedisSlowlogEntry {
+  id: number
+  time: number
+  durationUs: number
+  command: string
+  client?: string
+  clientName?: string
+}
+
+export interface RedisClient {
+  id: string
+  addr: string
+  name: string
+  ageSec: number
+  idleSec: number
+  db: number
+  cmd: string
+  user?: string
+  flags: string
+}
+
+export const REDIS_MAXMEMORY_POLICIES = ['noeviction', 'allkeys-lru', 'volatile-lru', 'allkeys-lfu', 'volatile-lfu', 'allkeys-random', 'volatile-random', 'volatile-ttl'] as const
+export const REDIS_KEY_PAGE_MAX = 500
+export const REDIS_KEY_ITEMS_MAX = 200
 
 export interface DbStatusSummary {
   mysql: DbEngineStatus
   postgres: DbEngineStatus
   mongo: DbEngineStatus
   mssql: DbEngineStatus
+  redis: DbEngineStatus
   sqlite: { installed: boolean; version?: string }
   backupsDir: string
   backupsCount: number
@@ -213,5 +338,6 @@ export const DB_ENGINE_LABEL: Record<DbEngine, string> = {
   postgres: 'PostgreSQL',
   mongo: 'MongoDB',
   mssql: 'SQL Server',
+  redis: 'Redis',
   sqlite: 'SQLite client'
 }

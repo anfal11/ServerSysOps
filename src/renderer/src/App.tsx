@@ -24,7 +24,9 @@ import {
   Users as UsersIcon,
   Wifi,
   WifiOff,
-  X
+  X,
+  Download,
+  RefreshCw
 } from 'lucide-react'
 import { useApp, type PageId } from '@/store/app'
 import { NAV, PAGES } from '@/pages'
@@ -34,6 +36,7 @@ import SettingsModal from '@/components/SettingsModal'
 import AuthPromptModal from '@/components/AuthPromptModal'
 import { ConfirmHost, Toaster, Loading, Button, Spinner, Dot } from '@/components/ui'
 import { cls } from '@/lib/format'
+import { api, errMsg } from '@/lib/api'
 
 const ICONS: Record<PageId, React.ReactNode> = {
   overview: <Gauge />,
@@ -123,6 +126,7 @@ function TabBar(): React.JSX.Element {
         <Button variant="ghost" size="sm" onClick={() => toggleTasks()} icon={running ? <Spinner size={13} /> : <ListChecks size={14} />}>
           Tasks{running ? ` (${running})` : ''}
         </Button>
+        <UpdateButton />
         {unack > 0 && (
           <span className="text-[10px] bg-warn/20 text-warn-fg border border-warn/40 rounded px-1.5 h-5 flex items-center" title="Unacknowledged alerts">
             {unack} alert{unack > 1 ? 's' : ''}
@@ -133,6 +137,33 @@ function TabBar(): React.JSX.Element {
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
+}
+
+/** Top-bar button that walks the user through download → restart when a new release exists. */
+function UpdateButton(): React.JSX.Element | null {
+  const update = useApp((s) => s.update)
+  const toast = useApp((s) => s.toast)
+  if (update.status === 'available')
+    return (
+      <Button
+        variant="primary"
+        size="sm"
+        icon={<Download size={13} />}
+        title={`Download version ${update.version}`}
+        onClick={() => api.global('update:download').catch((e) => toast({ kind: 'error', title: 'Download failed', detail: errMsg(e) }))}
+      >
+        Update to {update.version}
+      </Button>
+    )
+  if (update.status === 'downloading') return <span className="text-xs text-muted px-2">Downloading {update.version}… {update.percent ?? 0}%</span>
+  if (update.status === 'downloaded')
+    return (
+      <Button variant="primary" size="sm" icon={<RefreshCw size={13} />} title="Quit and install the update" onClick={() => api.global('update:install')}>
+        Restart to update
+      </Button>
+    )
+  if (update.status === 'error') return <span className="text-xs text-danger-fg px-2" title={update.error}>Update failed</span>
+  return null
 }
 
 function Workspace(): React.JSX.Element {

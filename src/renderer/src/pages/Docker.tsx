@@ -61,6 +61,7 @@ import {
   type MenuItem
 } from '@/components/ui'
 import { useApp } from '@/store/app'
+import { PackageUpdate } from '@/components/PackageUpdate'
 import { cls } from '@/lib/format'
 import type { DockerContainer, DockerImage, DockerNetwork, DockerVolume } from '@shared/types'
 import type {
@@ -82,6 +83,9 @@ type TabId = 'containers' | 'images' | 'volumes' | 'networks' | 'compose' | 'sys
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
+
+/** Candidate package names for the Docker engine across distros; `pkg:versions` reports which are actually installed. */
+const DOCKER_PACKAGES = ['docker-ce', 'docker-ce-cli', 'docker-compose-plugin', 'docker-buildx-plugin', 'docker.io', 'docker-compose-v2', 'moby-engine']
 
 function taskToast(title: string): void {
   useApp.getState().toast({ kind: 'info', title, detail: 'Progress is shown in the Tasks drawer.' })
@@ -188,6 +192,8 @@ export default function Docker({ serverId }: PageProps): React.JSX.Element {
               {d.composeVersion && <Badge>compose {d.composeVersion}</Badge>}
               {d.needsSudo && <Badge color="warn">via sudo</Badge>}
               {d.rootless && <Badge color="info">rootless</Badge>}
+              {/* Docker's own repo (docker-ce…) or the distro packages (docker.io / moby-engine); packages that are not installed are not shown. */}
+              <PackageUpdate serverId={serverId} packages={DOCKER_PACKAGES} restart={d.hasSystemd && !d.rootless ? ['docker'] : undefined} label="Docker" className="ml-1" />
             </span>
           ) : undefined
         }

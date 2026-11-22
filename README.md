@@ -41,7 +41,7 @@ Windows: two ready-to-run files are produced in `release/` by `npm run dist`:
 | `ServerSysOps_<version>_x64-setup.exe` | Installer (per-user, no admin rights needed, desktop + Start menu shortcut, uninstaller). Put this on your website for one-click download → install. |
 | `ServerSysOps_<version>_x64-portable.exe` | Single-file portable build: runs from a USB stick or any folder without installing. Settings live in `%APPDATA%\ServerSysOps`. |
 
-Official downloads live on [GitHub Releases](https://github.com/anfal11/ServerSysOps/releases); the landing page in `site/` (deployed on Vercel) links to the latest release automatically. Installed copies check GitHub Releases on start and offer updates in Settings.
+Official downloads live on [GitHub Releases](https://github.com/anfal11/ServerSysOps/releases); the landing page in `site/` (deployed on Vercel) links to the permanent `releases/latest/download/ServerSysOps-setup.exe` style URLs (CI uploads version-less copies of every package), so the buttons always serve the newest release without calling the GitHub API. Installed copies check GitHub Releases on start and offer updates in Settings.
 
 macOS: `ServerSysOps_<version>_mac-arm64.dmg` (Apple Silicon) and `ServerSysOps_<version>_mac-x64.dmg` (Intel), built by the GitHub Actions workflow in `.github/workflows/release.yml` (macOS packages can only be built on macOS). The app is not notarized: on first launch right-click → Open, or allow it under System Settings → Privacy & Security. In-app updates are Windows-only; on Mac the update banner opens the download page.
 

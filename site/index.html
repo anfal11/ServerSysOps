@@ -94,13 +94,13 @@
     <h1>Manage your Linux servers<br />from one desktop app</h1>
     <p>Overview, terminal, files, Docker, Kubernetes, web server, databases, firewall, users, cron, security audit and two-factor auth. Everything works over plain SSH – nothing to install on the server.</p>
     <div class="cta">
-      <a class="btn primary" id="dl-setup" href="https://github.com/anfal11/ServerSysOps/releases/latest">
+      <a class="btn primary" id="dl-setup" href="https://github.com/anfal11/ServerSysOps/releases/latest/download/ServerSysOps-setup.exe">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Download for Windows
       </a>
-      <a class="btn" id="dl-portable" href="https://github.com/anfal11/ServerSysOps/releases/latest">Portable .exe (no install)</a>
-      <a class="btn" id="dl-mac-arm" href="https://github.com/anfal11/ServerSysOps/releases/latest" hidden>Mac · Apple Silicon</a>
-      <a class="btn" id="dl-mac-x64" href="https://github.com/anfal11/ServerSysOps/releases/latest" hidden>Mac · Intel</a>
+      <a class="btn" id="dl-portable" href="https://github.com/anfal11/ServerSysOps/releases/latest/download/ServerSysOps-portable.exe">Portable .exe (no install)</a>
+      <a class="btn" id="dl-mac-arm" href="https://github.com/anfal11/ServerSysOps/releases/latest/download/ServerSysOps-mac-arm64.dmg">Mac · Apple Silicon</a>
+      <a class="btn" id="dl-mac-x64" href="https://github.com/anfal11/ServerSysOps/releases/latest/download/ServerSysOps-mac-x64.dmg">Mac · Intel</a>
     </div>
     <div class="meta" id="meta">Free to use · Windows 10/11 (64-bit) · macOS 11+</div>
 
@@ -189,7 +189,9 @@
 
   <script>
     document.getElementById('year').textContent = new Date().getFullYear()
-    // Point the buttons at the newest release assets (falls back to the releases page).
+    // The buttons link to GitHub's permanent ".../releases/latest/download/<file>" URLs, which always
+    // serve the newest release without any API call. The API (60 requests/hour per IP, unauthenticated)
+    // is only used to add the version number and file sizes; when it fails nothing changes.
     fetch('https://api.github.com/repos/anfal11/ServerSysOps/releases/latest')
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((rel) => {
@@ -200,21 +202,10 @@
         const macArm = find(/mac-arm64\.dmg$/i)
         const macX64 = find(/mac-x64\.dmg$/i)
         const mb = (a) => (a.size / 1048576).toFixed(0) + ' MB'
-        if (setup) {
-          document.getElementById('dl-setup').href = setup.browser_download_url
-          document.getElementById('dl-setup').lastChild.textContent = ' Download for Windows · ' + rel.tag_name.replace(/^v/, '') + ' · ' + mb(setup)
-        }
-        if (portable) {
-          const p = document.getElementById('dl-portable')
-          p.href = portable.browser_download_url
-          p.textContent = 'Portable .exe (no install) · ' + mb(portable)
-        }
+        if (setup) document.getElementById('dl-setup').lastChild.textContent = ' Download for Windows · ' + rel.tag_name.replace(/^v/, '') + ' · ' + mb(setup)
+        if (portable) document.getElementById('dl-portable').textContent = 'Portable .exe (no install) · ' + mb(portable)
         for (const [id, a, label] of [['dl-mac-arm', macArm, 'Mac · Apple Silicon'], ['dl-mac-x64', macX64, 'Mac · Intel']]) {
-          if (!a) continue
-          const el = document.getElementById(id)
-          el.href = a.browser_download_url
-          el.textContent = label + ' · ' + mb(a)
-          el.hidden = false
+          if (a) document.getElementById(id).textContent = label + ' · ' + mb(a)
         }
         document.getElementById('meta').insertAdjacentHTML('afterbegin', 'Version <code>' + rel.tag_name.replace(/^v/, '') + '</code> · released ' + new Date(rel.published_at).toLocaleDateString() + ' · ')
       })

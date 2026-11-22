@@ -76,6 +76,28 @@ jobs:
           # No certificates: never try to look one up (macOS) or sign (Windows).
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      - name: Publish version-less copies for the website's permanent download links
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          cd release
+          files=()
+          for f in *_x64-setup.exe *_x64-portable.exe *_mac-arm64.dmg *_mac-x64.dmg; do
+            [ -f "$f" ] || continue
+            case "$f" in
+              *_x64-setup.exe) n=ServerSysOps-setup.exe ;;
+              *_x64-portable.exe) n=ServerSysOps-portable.exe ;;
+              *_mac-arm64.dmg) n=ServerSysOps-mac-arm64.dmg ;;
+              *_mac-x64.dmg) n=ServerSysOps-mac-x64.dmg ;;
+            esac
+            cp "$f" "$n"
+            files+=("$n")
+          done
+          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+
       - name: Keep the packages as workflow artifacts too
         uses: actions/upload-artifact@v4
         with:

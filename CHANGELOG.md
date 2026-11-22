@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2 - 2026-11-22
+
+### Fixed
+- Website download buttons sometimes opened the GitHub release page instead of downloading. They relied on the GitHub API, which allows only 60 anonymous requests per hour per IP address. The buttons now use GitHub's permanent "latest release" download links (CI publishes version-less copies of every package), so they always download directly; the API is only used to show the version and file sizes.
+
 ## 0.5.1 - 2026-11-22
 
 ### Fixed

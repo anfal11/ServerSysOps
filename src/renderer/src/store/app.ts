@@ -9,6 +9,7 @@ export type PageId =
   | 'terminal'
   | 'files'
   | 'docker'
+  | 'kubernetes'
   | 'webserver'
   | 'databases'
   | 'runtimes'

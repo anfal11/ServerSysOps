@@ -8,6 +8,7 @@ import * as overview from './services/overview'
 import * as quickactions from './services/quickactions'
 import * as files from './services/files'
 import * as docker from './services/docker'
+import * as kubernetes from './services/kubernetes'
 import * as webserver from './services/webserver'
 import * as databases from './services/databases'
 import * as runtimes from './services/runtimes'
@@ -73,7 +74,7 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
 
   const ctx = createContext()
-  for (const svc of [servers, terminal, overview, quickactions, files, docker, webserver, databases, runtimes, cron, processes, users, firewall, twofactor, security, logs, snippets, alerts, tunnels, backup, pkgupdates]) {
+  for (const svc of [servers, terminal, overview, quickactions, files, docker, kubernetes, webserver, databases, runtimes, cron, processes, users, firewall, twofactor, security, logs, snippets, alerts, tunnels, backup, pkgupdates]) {
     svc.register(ctx)
   }
   updater.register(ctx)

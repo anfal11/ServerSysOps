@@ -1,7 +1,7 @@
 {
   "name": "central-server",
   "productName": "Central Server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Desktop app to manage and control Linux servers over SSH: overview, terminal, files, Docker, web servers, databases, runtimes, cron, processes, users, firewall, security audit and more.",
   "main": "./out/main/index.js",
   "author": "Central Server",

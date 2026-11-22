@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0 – 2026-11-22
+
+### New
+- **Kubernetes** module: works through `kubectl` on the server (k3s, microk8s, kubeadm or any cluster whose kubeconfig is there). Overview with nodes (cordon, drain), workloads (deployments, statefulsets, daemonsets, jobs, cronjobs: scale, restart, set image, trigger, delete), pods (logs, describe, events, shell, delete), services and ingresses, configmaps, secrets, volumes, namespaces, events, Helm releases, an Apply-YAML editor with server dry run, and one-click installers for k3s, microk8s or kubectl.
+
 ## 0.2.0 – 2026-11-22
 
 **Renamed:** ServerMate is now **Central Server**. Installed copies of 0.1.0 keep their servers, settings and snippets (data is migrated on first start). Server-side files written by the app now use the `centralserver` prefix.

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>ServerSysOps · Visitor stats</title>
+  <link rel="icon" href="favicon.svg" />
+  <style>
+    :root { --bg:#14161b; --panel:#1c1f26; --border:#2a2e38; --text:#e6e8ee; --muted:#8b92a3; --accent:#4f8ef7; --ok:#3ecf8e; --warn:#f5a623; }
+    * { box-sizing: border-box } [hidden] { display: none !important }
+    body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif }
+    .wrap { max-width:1280px; margin:0 auto; padding:24px }
+    h1 { font-size:20px; margin:0 } h2 { font-size:15px; margin:28px 0 10px }
+    .top { display:flex; gap:12px; align-items:center; flex-wrap:wrap; justify-content:space-between }
+    .ctl { display:flex; gap:8px; flex-wrap:wrap }
+    button, select, input { background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:7px 12px; font:inherit }
+    button.primary { background:var(--accent); border-color:transparent; color:#fff; cursor:pointer }
+    button { cursor:pointer }
+    .tiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; margin-top:20px }
+    .tile { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:14px }
+    .tile small { color:var(--muted); display:block } .tile b { font-size:24px; font-variant-numeric:tabular-nums }
+    .tbl { background:var(--panel); border:1px solid var(--border); border-radius:12px; overflow:auto; max-height:560px }
+    table { border-collapse:collapse; width:100%; font-size:13px }
+    th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); white-space:nowrap; vertical-align:top }
+    th { position:sticky; top:0; background:#22262f; color:var(--muted); font-weight:600 }
+    td.wrapc { white-space:normal; max-width:280px; word-break:break-all }
+    .bar { display:inline-block; height:6px; border-radius:3px; background:var(--accent); vertical-align:middle; margin-right:6px }
+    .yes { color:var(--ok); font-weight:600 } .muted { color:var(--muted) }
+    .login { max-width:340px; margin:120px auto; background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:24px; display:grid; gap:12px }
+    .err { color:#ff6b6b }
+    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px } @media (max-width:900px){ .grid2{ grid-template-columns:1fr } }
+  </style>
+</head>
+<body>
+  <div id="login" class="login">
+    <h1>Visitor stats</h1>
+    <input id="pw" type="password" placeholder="Password" autofocus />
+    <button class="primary" id="go">Open</button>
+    <div id="err" class="err"></div>
+  </div>
+
+  <div id="app" class="wrap" hidden>
+    <div class="top">
+      <h1>ServerSysOps · Visitor stats</h1>
+      <div class="ctl">
+        <select id="range">
+          <option value="1">Last 24 hours</option>
+          <option value="7" selected>Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="0">All time</option>
+        </select>
+        <input id="filter" placeholder="Filter IP / country / city…" />
+        <button id="reload">Reload</button>
+        <button id="csv">Export CSV</button>
+        <button id="logout">Log out</button>
+      </div>
+    </div>
+
+    <div class="tiles" id="tiles"></div>
+
+    <h2>Visits <span class="muted" id="visitsCount"></span></h2>
+    <div class="tbl"><table id="visits"></table></div>
+
+    <div class="grid2">
+      <div><h2>By IP address</h2><div class="tbl"><table id="ips"></table></div></div>
+      <div><h2>Downloads</h2><div class="tbl"><table id="downloads"></table></div></div>
+    </div>
+    <div class="grid2">
+      <div><h2>Countries</h2><div class="tbl"><table id="countries"></table></div></div>
+      <div><h2>Where visitors came from</h2><div class="tbl"><table id="refs"></table></div></div>
+    </div>
+    <h2>Other link clicks</h2>
+    <div class="tbl"><table id="clicks"></table></div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id)
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+    const fmtT = (ts) => new Date(ts).toLocaleString()
+    const fmtDur = (s) => (s == null ? '—' : s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + (s % 60) + 's')
+    const pct = (a, b) => (b ? Math.round((a / b) * 100) + '%' : '—')
+    let all = []
+
+    function device(ua) {
+      ua = ua || ''
+      const os = /Windows NT 10/.test(ua) ? 'Windows' : /Windows/.test(ua) ? 'Windows (old)' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : 'Other'
+      const br = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Other'
+      return os + ' · ' + br + (/Mobile/.test(ua) ? ' · mobile' : '')
+    }
+    function place(e) { return [e.city, e.region, e.country].filter(Boolean).join(', ') || '—' }
+    function refHost(r) { if (!r) return '(direct)'; try { return new URL(r).host } catch { return r } }
+
+    async function load() {
+      const pw = sessionStorage.getItem('sso_pw')
+      if (!pw) return showLogin()
+      const r = await fetch('/api/stats', { headers: { Authorization: 'Bearer ' + pw } })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) { sessionStorage.removeItem('sso_pw'); return showLogin(j.error || 'Error ' + r.status) }
+      all = j.events || []
+      $('login').hidden = true; $('app').hidden = false
+      render()
+    }
+    function showLogin(msg) { $('app').hidden = true; $('login').hidden = false; $('err').textContent = msg || '' }
+
+    function visitsOf(events) {
+      const m = new Map()
+      for (const e of events.slice().sort((a, b) => a.ts - b.ts)) {
+        if (!e.sid) continue
+        let v = m.get(e.sid)
+        if (!v) { v = { sid: e.sid, vid: e.vid, ts: e.ts, ip: e.ip, place: place(e), country: e.country, ua: e.ua, ref: '', utm: '', scroll: 0, dur: null, sections: new Set(), downloads: [] }; m.set(e.sid, v) }
+        if (e.t === 'view') { v.ts = e.ts; v.ref = e.ref || ''; v.utm = e.utm || '' }
+        if (e.t === 'section' && e.target) v.sections.add(e.target)
+        if (e.t === 'leave') { v.scroll = Math.max(v.scroll, e.scroll || 0); v.dur = Math.max(v.dur || 0, e.dur || 0); (e.sections || []).forEach((s) => v.sections.add(s)) }
+        if (e.t === 'download') v.downloads.push(e.target)
+      }
+      return [...m.values()].sort((a, b) => b.ts - a.ts)
+    }
+
+    function table(el, head, rows) {
+      el.innerHTML = '<tr>' + head.map((h) => '<th>' + h + '</th>').join('') + '</tr>' + (rows.length ? rows.join('') : '<tr><td colspan="' + head.length + '" class="muted">No data yet</td></tr>')
+    }
+
+    function render() {
+      const days = Number($('range').value)
+      const since = days ? Date.now() - days * 86400000 : 0
+      const f = $('filter').value.trim().toLowerCase()
+      const ev = all.filter((e) => e.ts >= since && (!f || [e.ip, e.country, e.region, e.city].some((x) => (x || '').toLowerCase().includes(f))))
+      const visits = visitsOf(ev)
+      const dls = ev.filter((e) => e.t === 'download')
+      const withLeave = visits.filter((v) => v.dur != null)
+      const avgScroll = withLeave.length ? Math.round(withLeave.reduce((s, v) => s + v.scroll, 0) / withLeave.length) : 0
+      const avgDur = withLeave.length ? Math.round(withLeave.reduce((s, v) => s + v.dur, 0) / withLeave.length) : null
+      const dlVisitors = new Set(dls.map((e) => e.vid)).size
+      const uniqVisitors = new Set(visits.map((v) => v.vid)).size
+
+      $('tiles').innerHTML = [
+        ['Page views', visits.length],
+        ['Unique visitors', uniqVisitors],
+        ['Unique IPs', new Set(visits.map((v) => v.ip)).size],
+        ['Download clicks', dls.length],
+        ['Visitors who downloaded', dlVisitors + ' (' + pct(dlVisitors, uniqVisitors) + ')'],
+        ['Read to the end (≥90%)', pct(withLeave.filter((v) => v.scroll >= 90).length, withLeave.length)],
+        ['Avg. scroll depth', avgScroll + '%'],
+        ['Avg. time on page', fmtDur(avgDur)]
+      ].map(([k, v]) => '<div class="tile"><small>' + k + '</small><b>' + esc(v) + '</b></div>').join('')
+
+      $('visitsCount').textContent = '(' + visits.length + ')'
+      table($('visits'), ['Time', 'IP', 'Location', 'Device', 'Came from', 'Scroll', 'Time on page', 'Sections seen', 'Downloaded'], visits.slice(0, 2000).map((v) =>
+        '<tr><td>' + esc(fmtT(v.ts)) + '</td><td>' + esc(v.ip) + '</td><td>' + esc(v.place) + '</td><td>' + esc(device(v.ua)) + '</td><td class="wrapc">' + esc(refHost(v.ref)) + (v.utm ? ' <span class="muted">' + esc(v.utm) + '</span>' : '') +
+        '</td><td><span class="bar" style="width:' + Math.round(v.scroll * 0.6) + 'px"></span>' + (v.dur == null ? '—' : v.scroll + '%') + '</td><td>' + fmtDur(v.dur) + '</td><td>' + esc([...v.sections].join(', ') || '—') +
+        '</td><td>' + (v.downloads.length ? '<span class="yes">' + esc(v.downloads.join(', ')) + '</span>' : '<span class="muted">no</span>') + '</td></tr>'))
+
+      const byIp = new Map()
+      for (const v of visits) { const x = byIp.get(v.ip) || { ip: v.ip, place: v.place, views: 0, dl: 0, last: 0 }; x.views++; x.dl += v.downloads.length; x.last = Math.max(x.last, v.ts); byIp.set(v.ip, x) }
+      table($('ips'), ['IP', 'Location', 'Views', 'Downloads', 'Last seen'], [...byIp.values()].sort((a, b) => b.views - a.views).map((x) =>
+        '<tr><td>' + esc(x.ip) + '</td><td>' + esc(x.place) + '</td><td>' + x.views + '</td><td>' + (x.dl ? '<span class="yes">' + x.dl + '</span>' : 0) + '</td><td>' + esc(fmtT(x.last)) + '</td></tr>'))
+
+      table($('downloads'), ['Time', 'IP', 'Location', 'Which', 'File'], dls.map((e) =>
+        '<tr><td>' + esc(fmtT(e.ts)) + '</td><td>' + esc(e.ip) + '</td><td>' + esc(place(e)) + '</td><td>' + esc(e.target) + '</td><td class="wrapc">' + esc((e.href || '').split('/').pop()) + '</td></tr>'))
+
+      const count = (arr, key) => { const m = new Map(); for (const a of arr) { const k = key(a); m.set(k, (m.get(k) || 0) + 1) } return [...m.entries()].sort((a, b) => b[1] - a[1]) }
+      const cRows = count(visits, (v) => v.country || '—')
+      table($('countries'), ['Country', 'Views', 'Downloads'], cRows.map(([c, n]) =>
+        '<tr><td>' + esc(c) + '</td><td>' + n + '</td><td>' + dls.filter((e) => (e.country || '—') === c).length + '</td></tr>'))
+      table($('refs'), ['Source', 'Views'], count(visits, (v) => refHost(v.ref) + (v.utm ? ' (' + v.utm + ')' : '')).map(([r, n]) => '<tr><td class="wrapc">' + esc(r) + '</td><td>' + n + '</td></tr>'))
+      table($('clicks'), ['Time', 'IP', 'Link', 'URL'], ev.filter((e) => e.t === 'click').map((e) =>
+        '<tr><td>' + esc(fmtT(e.ts)) + '</td><td>' + esc(e.ip) + '</td><td>' + esc(e.target) + '</td><td class="wrapc">' + esc(e.href) + '</td></tr>'))
+    }
+
+    function csv() {
+      const visits = visitsOf(all)
+      const q = (s) => '"' + String(s ?? '').replace(/"/g, '""') + '"'
+      const lines = [['time', 'ip', 'location', 'device', 'referrer', 'utm', 'scroll_pct', 'seconds', 'sections', 'downloads'].join(',')]
+      for (const v of visits) lines.push([new Date(v.ts).toISOString(), v.ip, v.place, device(v.ua), v.ref, v.utm, v.scroll, v.dur ?? '', [...v.sections].join(' '), v.downloads.join(' ')].map(q).join(','))
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }))
+      a.download = 'serversysops-visits-' + new Date().toISOString().slice(0, 10) + '.csv'
+      a.click()
+    }
+
+    $('go').onclick = () => { sessionStorage.setItem('sso_pw', $('pw').value); load() }
+    $('pw').onkeydown = (e) => { if (e.key === 'Enter') $('go').click() }
+    $('range').onchange = render
+    $('filter').oninput = render
+    $('reload').onclick = load
+    $('csv').onclick = csv
+    $('logout').onclick = () => { sessionStorage.removeItem('sso_pw'); showLogin() }
+    load()
+  </script>
+</body>
+</html>

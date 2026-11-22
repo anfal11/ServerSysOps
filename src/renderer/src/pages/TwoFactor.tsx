@@ -112,7 +112,7 @@ export default function TwoFactor({ serverId }: PageProps): React.JSX.Element {
           <p>
             Delete <code>~{u.name}/.google_authenticator</code>. The authenticator app entry stops working.
           </p>
-          {u.self && <Callout kind="warn">This is the account ServerMate uses. The secret is also removed from the server profile. While 2FA is enforced without nullok this is refused to avoid a lock-out.</Callout>}
+          {u.self && <Callout kind="warn">This is the account Central Server uses. The secret is also removed from the server profile. While 2FA is enforced without nullok this is refused to avoid a lock-out.</Callout>}
           {st?.mode !== 'off' && !st?.nullok && !u.self && <Callout kind="danger">2FA is enforced without nullok: {u.name} will not be able to log in until enrolled again.</Callout>}
         </div>
       ),
@@ -132,7 +132,7 @@ export default function TwoFactor({ serverId }: PageProps): React.JSX.Element {
             <p>
               A new secret replaces the current one. <b>The existing entry in the authenticator app stops working</b> and the old emergency codes become invalid.
             </p>
-            {u.self && <p>The new secret is saved in this server profile so ServerMate keeps logging in automatically.</p>}
+            {u.self && <p>The new secret is saved in this server profile so Central Server keeps logging in automatically.</p>}
           </div>
         ),
         danger: true,
@@ -168,16 +168,16 @@ export default function TwoFactor({ serverId }: PageProps): React.JSX.Element {
           </p>
           <ul className="list-disc pl-5 space-y-1 text-muted">
             <li>
-              <code>/etc/pam.d/sshd</code> gets <code>auth required pam_google_authenticator.so{nullok ? ' nullok' : ''}</code> (backup in <code>sshd.servermate.bak</code>).
+              <code>/etc/pam.d/sshd</code> gets <code>auth required pam_google_authenticator.so{nullok ? ' nullok' : ''}</code> (backup in <code>sshd.centralserver.bak</code>).
             </li>
             <li>
-              <code>{st.sshdIncludeSupported ? '/etc/ssh/sshd_config.d/00-servermate-2fa.conf' : 'a marker block at the top of /etc/ssh/sshd_config'}</code> sets <code>AuthenticationMethods</code>, <code>KbdInteractiveAuthentication yes</code>, <code>UsePAM yes</code>, <code>PasswordAuthentication no</code>.
+              <code>{st.sshdIncludeSupported ? '/etc/ssh/sshd_config.d/00-centralserver-2fa.conf' : 'a marker block at the top of /etc/ssh/sshd_config'}</code> sets <code>AuthenticationMethods</code>, <code>KbdInteractiveAuthentication yes</code>, <code>UsePAM yes</code>, <code>PasswordAuthentication no</code>.
             </li>
             <li>
-              <code>sshd -t</code>, reload, then ServerMate opens a second SSH login with the saved credentials and its stored code.
+              <code>sshd -t</code>, reload, then Central Server opens a second SSH login with the saved credentials and its stored code.
             </li>
             <li>
-              <b>The change is reverted automatically if ServerMate cannot log back in.</b>
+              <b>The change is reverted automatically if Central Server cannot log back in.</b>
             </li>
           </ul>
           {!nullok && <Callout kind="danger">nullok is off: every account without <code>~/.google_authenticator</code> is locked out of SSH immediately.</Callout>}
@@ -197,7 +197,7 @@ export default function TwoFactor({ serverId }: PageProps): React.JSX.Element {
       title: 'Disable two-factor authentication',
       message: (
         <div className="space-y-2">
-          <p>Remove the ServerMate lines from <code>/etc/pam.d/sshd</code> and the sshd drop-in, test, reload and verify the login. Enrollments are kept, so you can re-enable later without new QR codes.</p>
+          <p>Remove the Central Server lines from <code>/etc/pam.d/sshd</code> and the sshd drop-in, test, reload and verify the login. Enrollments are kept, so you can re-enable later without new QR codes.</p>
           <p className="text-muted">Password / key logins work as before. Remember to re-check your SSH login rules in Overview.</p>
         </div>
       ),
@@ -252,7 +252,7 @@ export default function TwoFactor({ serverId }: PageProps): React.JSX.Element {
                     <b className="text-text">Time-based one-time codes for SSH logins.</b> The Google Authenticator PAM module asks every user for a 6-digit code from their phone in addition to (or instead of) their password or key. Any TOTP app works: Google Authenticator, Authy, Microsoft Authenticator, 1Password, Bitwarden, FreeOTP…
                   </p>
                   <p>
-                    ServerMate keeps the secret of its own login account <b className="text-text">{st.loginUser}</b> in this server profile, so it can answer the code prompt itself and keep connecting automatically. Before any rule is enforced, ServerMate verifies its own login and reverts the change if it fails, so you cannot lock yourself out from here.
+                    Central Server keeps the secret of its own login account <b className="text-text">{st.loginUser}</b> in this server profile, so it can answer the code prompt itself and keep connecting automatically. Before any rule is enforced, Central Server verifies its own login and reverts the change if it fails, so you cannot lock yourself out from here.
                   </p>
                 </div>
               </div>
@@ -495,7 +495,7 @@ export default function TwoFactor({ serverId }: PageProps): React.JSX.Element {
                   <div className="font-medium text-text">What happens when you click {enforced ? 'Apply' : 'Enable'}</div>
                   <ol className="list-decimal pl-5 space-y-0.5">
                     <li>
-                      Back up <code>/etc/pam.d/sshd</code> → <code>/etc/pam.d/sshd.servermate.bak</code> and <code>/etc/ssh/sshd_config</code>.
+                      Back up <code>/etc/pam.d/sshd</code> → <code>/etc/pam.d/sshd.centralserver.bak</code> and <code>/etc/ssh/sshd_config</code>.
                     </li>
                     <li>
                       {mode === 'password+code' ? (
@@ -509,13 +509,13 @@ export default function TwoFactor({ serverId }: PageProps): React.JSX.Element {
                       )}
                     </li>
                     <li>
-                      Write {st.sshdIncludeSupported ? <code>/etc/ssh/sshd_config.d/00-servermate-2fa.conf</code> : <>a marker block at the top of <code>/etc/ssh/sshd_config</code> (no Include support)</>}: <code>UsePAM yes</code>, <code>KbdInteractiveAuthentication yes</code>, <code>PasswordAuthentication no</code>, <code>AuthenticationMethods …</code>.
+                      Write {st.sshdIncludeSupported ? <code>/etc/ssh/sshd_config.d/00-centralserver-2fa.conf</code> : <>a marker block at the top of <code>/etc/ssh/sshd_config</code> (no Include support)</>}: <code>UsePAM yes</code>, <code>KbdInteractiveAuthentication yes</code>, <code>PasswordAuthentication no</code>, <code>AuthenticationMethods …</code>.
                     </li>
                     <li>
                       <code>sshd -t</code>, reload sshd, then open a verification SSH login as <b>{st.loginUser}</b> with the saved {st.profileAuth === 'password' ? 'password' : st.profileAuth === 'key' ? 'key' : 'agent key'} and the stored code.
                     </li>
                     <li>
-                      <b className="text-text">If that login fails, both files are restored and sshd reloaded — the change is reverted automatically if ServerMate cannot log back in.</b>
+                      <b className="text-text">If that login fails, both files are restored and sshd reloaded — the change is reverted automatically if Central Server cannot log back in.</b>
                     </li>
                   </ol>
                 </div>
@@ -561,7 +561,7 @@ export default function TwoFactor({ serverId }: PageProps): React.JSX.Element {
                 <div className="col-span-2 flex items-start gap-2 border-t border-border pt-3">
                   <Smartphone size={14} className="shrink-0 mt-0.5" />
                   <p>
-                    This server profile {st.profileHasTotp ? 'now contains' : 'can contain'} the TOTP secret of <b>{st.loginUser}</b> (Edit server → <i>2FA secret</i>), so ServerMate answers the code prompt by itself. Anyone with access to this computer’s profile store can therefore log in as that account — protect your OS user account accordingly.
+                    This server profile {st.profileHasTotp ? 'now contains' : 'can contain'} the TOTP secret of <b>{st.loginUser}</b> (Edit server → <i>2FA secret</i>), so Central Server answers the code prompt by itself. Anyone with access to this computer’s profile store can therefore log in as that account — protect your OS user account accordingly.
                   </p>
                 </div>
               </div>
@@ -622,7 +622,7 @@ function EnrollModal({ serverId, user, force, hostname, onClose, onDone }: { ser
   }
 
   const scratchText = (r: TfaEnrollResult): string =>
-    [`ServerMate two-factor emergency codes`, `Account: ${r.account}`, `Generated: ${new Date().toISOString()}`, '', 'Each code works once. Keep this file somewhere safe (not on the server).', '', ...r.scratchCodes].join('\n') + '\n'
+    [`Central Server two-factor emergency codes`, `Account: ${r.account}`, `Generated: ${new Date().toISOString()}`, '', 'Each code works once. Keep this file somewhere safe (not on the server).', '', ...r.scratchCodes].join('\n') + '\n'
 
   return (
     <Modal
@@ -667,12 +667,12 @@ function EnrollModal({ serverId, user, force, hostname, onClose, onDone }: { ser
           </div>
           {user.self ? (
             <div className="border border-border rounded-md p-3 bg-bg-2/40 space-y-1">
-              <Checkbox checked disabled onChange={() => {}} label="Save secret in this app so ServerMate can log in automatically" />
-              <div className="text-[11px] text-dim pl-6">Required for the login account: ServerMate uses it to answer the “Verification code” prompt and to verify the rules before enforcing them. Stored encrypted with the other profile secrets.</div>
+              <Checkbox checked disabled onChange={() => {}} label="Save secret in this app so Central Server can log in automatically" />
+              <div className="text-[11px] text-dim pl-6">Required for the login account: Central Server uses it to answer the “Verification code” prompt and to verify the rules before enforcing them. Stored encrypted with the other profile secrets.</div>
             </div>
           ) : (
             <Callout>
-              Hand the QR code to <b>{user.name}</b> or scan it on their behalf. The secret is not kept by ServerMate.
+              Hand the QR code to <b>{user.name}</b> or scan it on their behalf. The secret is not kept by Central Server.
             </Callout>
           )}
           {force && <Callout kind="warn">Re-enrolling invalidates the current authenticator entry and emergency codes of {user.name}.</Callout>}
@@ -719,7 +719,7 @@ function EnrollModal({ serverId, user, force, hostname, onClose, onDone }: { ser
               </div>
               {result.savedToProfile && (
                 <div className="text-[11px] text-ok-fg flex items-center gap-1.5">
-                  <Check size={12} /> Secret saved in this server profile; ServerMate will answer code prompts itself.
+                  <Check size={12} /> Secret saved in this server profile; Central Server will answer code prompts itself.
                 </div>
               )}
             </div>

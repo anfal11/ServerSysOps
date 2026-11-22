@@ -1,6 +1,6 @@
-# ServerMate module guide (for contributors and code generators)
+# Central Server module guide (for contributors and code generators)
 
-ServerMate is an Electron + React + TypeScript desktop app that manages Linux servers over SSH only (no agent on the server).
+Central Server is an Electron + React + TypeScript desktop app that manages Linux servers over SSH only (no agent on the server).
 Every feature is a **module** made of two files:
 
 | Part | Path | Runs in |

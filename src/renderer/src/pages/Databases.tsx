@@ -671,7 +671,7 @@ function DatabasesTable({ serverId, engine, dbs, onBrowse, onCredentials }: { se
   }
   const backup = async (d: DbDatabase): Promise<void> => {
     const id = await run(() => api.call<string>('db:backup', serverId, engine, d.name))
-    if (id) toastInfo(`Backing up ${d.name}…`, 'The dump is written to /var/backups/servermate (see Tasks).')
+    if (id) toastInfo(`Backing up ${d.name}…`, 'The dump is written to /var/backups/centralserver (see Tasks).')
   }
 
   const list = (dbs.data ?? []).filter((d) => (showSystem || !d.system) && (!filter || d.name.toLowerCase().includes(filter.toLowerCase())))

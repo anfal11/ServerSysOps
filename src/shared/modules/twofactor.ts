@@ -1,7 +1,7 @@
 // Types shared by the two-factor service (main) and the TwoFactor page (renderer).
 import type { AuthMethod } from '../types'
 
-/** Enforcement mode derived from the ServerMate-managed sshd drop-in. */
+/** Enforcement mode derived from the Central Server-managed sshd drop-in. */
 export type TfaMode = 'off' | 'password+code' | 'key+code' | 'key-or-code'
 export type TfaEnforceMode = Exclude<TfaMode, 'off'>
 
@@ -10,7 +10,7 @@ export interface TfaUser {
   uid: number
   /** `~/.google_authenticator` exists. */
   enrolled: boolean
-  /** The account ServerMate is logged in with. */
+  /** The account Central Server is logged in with. */
   self: boolean
   /** Number of keys in ~/.ssh/authorized_keys. */
   hasKeys: number
@@ -71,7 +71,7 @@ export interface TfaEnrollOptions {
   window?: number
   /** Overwrite an existing enrollment. */
   force?: boolean
-  /** Login user only: store the secret in the app profile so ServerMate can answer the prompt itself. */
+  /** Login user only: store the secret in the app profile so Central Server can answer the prompt itself. */
   saveToProfile?: boolean
 }
 

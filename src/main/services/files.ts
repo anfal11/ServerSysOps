@@ -154,7 +154,7 @@ function sftpReadHead(sftp: SFTPWrapper, p: string, max: number): Promise<Buffer
   })
 }
 
-function tmpName(prefix = 'servermate'): string {
+function tmpName(prefix = 'centralserver'): string {
   return `/tmp/.${prefix}-${randomBytes(6).toString('hex')}`
 }
 
@@ -350,7 +350,7 @@ async function downloadFile(ssh: SshClient, remote: string, local: string, sudo:
   } catch (e) {
     if (!sudo || t.cancelled || !isPermError(e)) throw e
     // Root-only file: copy to a readable temp file as root, fetch it, remove it.
-    const tmp = tmpName('servermate-dl')
+    const tmp = tmpName('centralserver-dl')
     await ssh.sudoRun(`cp -- ${shq(remote)} ${shq(tmp)} && chown ${shq(ssh.os?.user ?? ssh.profile.username)} ${shq(tmp)} && chmod 600 ${shq(tmp)}`)
     try {
       await sftpDownloadFile(sftp, tmp, local, t, onBytes)
@@ -404,7 +404,7 @@ async function runDownload(ctx: Ctx, ssh: SshClient, t: Transfer, remote: string
 /** Upload one local file to a remote path (progress via onBytes). In sudo mode it goes through /tmp and `mv`. */
 async function uploadFile(ssh: SshClient, local: string, remote: string, sudo: boolean, t: Transfer, onBytes: (n: number) => void): Promise<void> {
   const sftp = await ssh.sftp()
-  const target = sudo ? tmpName('servermate-up') : remote
+  const target = sudo ? tmpName('centralserver-up') : remote
   const rs = createReadStream(local, { highWaterMark: 256 * 1024 })
   const ws = sftp.createWriteStream(target, { highWaterMark: 256 * 1024 })
   t.cancel = () => {
@@ -558,7 +558,7 @@ export function register(ctx: Ctx): void {
         throw isPermError(e) ? new FilesError('EACCES', `Permission denied: ${p}`) : e
       }
     } else {
-      const tmp = tmpName('servermate-w')
+      const tmp = tmpName('centralserver-w')
       await sftpWriteFile(sftp, tmp, data)
       try {
         // Existing file: overwrite in place (keeps inode, mode and owner). New file: create with 0644.
@@ -815,7 +815,7 @@ export function register(ctx: Ctx): void {
           throw isPermError(e) ? new FilesError('EACCES', `Permission denied: ${remote}`) : e
         }
       } else {
-        const tmp = tmpName('servermate-up')
+        const tmp = tmpName('centralserver-up')
         await sftpWriteFile(sftp, tmp, buf)
         try {
           await ssh.sudoRun(`mv -f -- ${shq(tmp)} ${shq(remote)} && { chown --reference=${shq(d)} ${shq(remote)} 2>/dev/null || true; }`)

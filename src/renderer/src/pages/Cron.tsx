@@ -829,7 +829,7 @@ function RawModal({ serverId, user, raw, onClose, onSaved }: { serverId: string;
   const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
   const save = async (): Promise<void> => {
-    if (!text.trim() && !(await confirm({ title: 'Remove crontab', message: <>The editor is empty. Saving removes <b>every</b> cron job of {user} (a backup is kept in /var/backups/servermate).</>, danger: true, confirmLabel: 'Remove all jobs' }))) return
+    if (!text.trim() && !(await confirm({ title: 'Remove crontab', message: <>The editor is empty. Saving removes <b>every</b> cron job of {user} (a backup is kept in /var/backups/centralserver).</>, danger: true, confirmLabel: 'Remove all jobs' }))) return
     setBusy(true)
     setError(null)
     try {
@@ -852,7 +852,7 @@ function RawModal({ serverId, user, raw, onClose, onSaved }: { serverId: string;
       width="max-w-3xl"
       footer={
         <>
-          <span className="text-dim text-xs flex-1">Validated by <code>crontab</code> on the server; a backup of the previous version is kept in /var/backups/servermate.</span>
+          <span className="text-dim text-xs flex-1">Validated by <code>crontab</code> on the server; a backup of the previous version is kept in /var/backups/centralserver.</span>
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" loading={busy} onClick={save}>
             Save

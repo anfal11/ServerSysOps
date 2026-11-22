@@ -1,5 +1,5 @@
-appId: com.servermate.app
-productName: ServerMate
+appId: com.centralserver.app
+productName: Central Server
 directories:
   buildResources: build
   output: release
@@ -15,16 +15,16 @@ win:
       arch: [x64]
     - target: portable
       arch: [x64]
-  artifactName: ${productName}_${version}_${arch}-setup.${ext}
+  artifactName: CentralServer_${version}_${arch}-setup.${ext}
   icon: build/icon.ico
 portable:
-  artifactName: ${productName}_${version}_${arch}-portable.${ext}
+  artifactName: CentralServer_${version}_${arch}-portable.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   perMachine: false
   createDesktopShortcut: true
-  shortcutName: ServerMate
+  shortcutName: Central Server
 mac:
   category: public.app-category.developer-tools
   target: [dmg]

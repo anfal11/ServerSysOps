@@ -152,7 +152,7 @@ export function applyTheme(id: string | undefined): ThemeDef {
   root.dataset.theme = t.id
   root.dataset.kind = t.kind
   root.style.colorScheme = t.kind
-  window.dispatchEvent(new CustomEvent('servermate:theme', { detail: t }))
+  window.dispatchEvent(new CustomEvent('centralserver:theme', { detail: t }))
   return t
 }
 

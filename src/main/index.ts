@@ -34,7 +34,7 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     backgroundColor: '#0f1115',
-    title: 'ServerMate',
+    title: 'Central Server',
     autoHideMenuBar: true,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
@@ -46,7 +46,7 @@ function createWindow(): void {
     }
   })
   mainWindow.on('ready-to-show', () => mainWindow?.show())
-  if (process.env.SERVERMATE_DEBUG) {
+  if (process.env.CENTRALSERVER_DEBUG) {
     mainWindow.webContents.on('console-message', (ev) => {
       const { level, message, lineNumber, sourceId } = ev as unknown as { level: string | number; message: string; lineNumber: number; sourceId: string }
       console.log(`[renderer:${level}] ${message} (${sourceId}:${lineNumber})`)
@@ -63,7 +63,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  app.setAppUserModelId('com.servermate.app')
+  app.setAppUserModelId('com.centralserver.app')
   nativeTheme.themeSource = 'dark'
   Menu.setApplicationMenu(null)
 

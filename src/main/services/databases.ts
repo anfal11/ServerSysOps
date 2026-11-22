@@ -1494,7 +1494,7 @@ export function register(ctx: Ctx): void {
     } else if (engine === 'mongo') {
       const name = assertMongoName(nameRaw, 'database name')
       // MongoDB creates databases lazily; create a placeholder collection so it shows up.
-      await mongoEval(ssh, serverId, `var d = db.getSiblingDB(${JSON.stringify(name)}); d.createCollection('_servermate_init'); d.getSiblingDB(${JSON.stringify(name)}).getCollection('_servermate_init').drop(); d.createCollection('default'); print('__SM__' + JSON.stringify({ ok: 1 }));`)
+      await mongoEval(ssh, serverId, `var d = db.getSiblingDB(${JSON.stringify(name)}); d.createCollection('_centralserver_init'); d.getSiblingDB(${JSON.stringify(name)}).getCollection('_centralserver_init').drop(); d.createCollection('default'); print('__SM__' + JSON.stringify({ ok: 1 }));`)
     } else if (engine === 'mssql') {
       const name = assertIdent(nameRaw, 'database name')
       const coll = opts?.collation ? ` COLLATE ${assertIdent(opts.collation, 'collation')}` : ''

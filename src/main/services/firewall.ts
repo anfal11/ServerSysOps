@@ -26,7 +26,7 @@ const PORT_LIST_RE = /^\d{1,5}(,\d{1,5})*$/
 const PORT_RANGE_RE = /^\d{1,5}[:-]\d{1,5}$/
 const ACTIONS = ['allow', 'deny', 'reject', 'limit'] as const
 const LOG_LEVELS: FwLogLevel[] = ['off', 'low', 'medium', 'high', 'full']
-const SSH_COMMENT = 'SSH (ServerMate)'
+const SSH_COMMENT = 'SSH (Central Server)'
 
 function assertIp(s: string, what = 'address'): string {
   const v = String(s).trim()
@@ -709,7 +709,7 @@ export function register(ctx: Ctx): void {
       const cmds: string[] = []
       for (const p of def.ports) {
         if (st.rules.some((r) => ruleAllowsFromAnywhere(r, Number(p.port), p.proto))) continue
-        if (st.backend === 'ufw') cmds.push(`ufw allow in proto ${p.proto} from any to any port ${p.port} comment ${shq(id === 'ssh' ? SSH_COMMENT : `${def.label} (ServerMate)`)}`)
+        if (st.backend === 'ufw') cmds.push(`ufw allow in proto ${p.proto} from any to any port ${p.port} comment ${shq(id === 'ssh' ? SSH_COMMENT : `${def.label} (Central Server)`)}`)
         else cmds.push(`firewall-cmd --permanent --zone=${shq(zone)} --add-port=${p.port}/${p.proto} >/dev/null`)
       }
       if (!cmds.length) return { changed: 0 }

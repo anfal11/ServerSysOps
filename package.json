@@ -1,10 +1,10 @@
 {
-  "name": "servermate",
-  "productName": "ServerMate",
-  "version": "0.1.0",
+  "name": "central-server",
+  "productName": "Central Server",
+  "version": "0.2.0",
   "description": "Desktop app to manage and control Linux servers over SSH: overview, terminal, files, Docker, web servers, databases, runtimes, cron, processes, users, firewall, security audit and more.",
   "main": "./out/main/index.js",
-  "author": "ServerMate",
+  "author": "Central Server",
   "license": "MIT",
   "private": true,
   "scripts": {

@@ -7,11 +7,11 @@ export interface UserInfoEx extends UserInfo {
   fullName?: string
   /** Direct sudoers entry (not only via group). */
   sudoers: boolean
-  /** Password login disabled through the ServerMate sshd Match block. */
+  /** Password login disabled through the Central Server sshd Match block. */
   keyOnly: boolean
   /** Account expiry date is in the past (blocks every login method). */
   accountExpired: boolean
-  /** This is the account ServerMate is logged in with. */
+  /** This is the account Central Server is logged in with. */
   self: boolean
 }
 

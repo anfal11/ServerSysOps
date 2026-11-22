@@ -15,6 +15,7 @@ export type PageId =
   | 'runtimes'
   | 'cron'
   | 'processes'
+  | 'traffic'
   | 'users'
   | 'firewall'
   | 'twofactor'

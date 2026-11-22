@@ -25,6 +25,7 @@ import * as tunnels from './services/tunnels'
 import * as pkgupdates from './services/pkgupdates'
 import * as updater from './services/updater'
 import * as backup from './services/backup'
+import * as traffic from './services/traffic'
 import { APP_ID, APP_NAME, appIcon, migrateLegacyUserData } from './branding'
 
 const isDev = !app.isPackaged
@@ -74,7 +75,7 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
 
   const ctx = createContext()
-  for (const svc of [servers, terminal, overview, quickactions, files, docker, kubernetes, webserver, databases, runtimes, cron, processes, users, firewall, twofactor, security, logs, snippets, alerts, tunnels, backup, pkgupdates]) {
+  for (const svc of [servers, terminal, overview, quickactions, files, docker, kubernetes, webserver, databases, runtimes, cron, processes, users, firewall, twofactor, security, logs, snippets, alerts, tunnels, backup, pkgupdates, traffic]) {
     svc.register(ctx)
   }
   updater.register(ctx)

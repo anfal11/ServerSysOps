@@ -62,7 +62,7 @@ class DbError extends Error {
   }
 }
 
-interface Cred {
+export interface Cred {
   user: string
   password: string
 }
@@ -70,7 +70,7 @@ interface Cred {
 /** In-memory admin credentials per server+engine (never persisted). */
 const creds = new Map<string, Partial<Record<DbEngine, Cred>>>()
 
-function getCred(serverId: string, engine: DbEngine): Cred | undefined {
+export function getCred(serverId: string, engine: DbEngine): Cred | undefined {
   return creds.get(serverId)?.[engine]
 }
 
@@ -204,7 +204,7 @@ function cleanWhere(w: unknown): string | undefined {
 
 const US = '\x1f'
 
-interface Grid {
+export interface Grid {
   columns: string[]
   rows: (string | null)[][]
 }
@@ -243,7 +243,7 @@ const MYSQL_BIN = '"$(command -v mysql 2>/dev/null || command -v mariadb 2>/dev/
 const MYSQLDUMP_BIN = '"$(command -v mysqldump 2>/dev/null || command -v mariadb-dump 2>/dev/null || echo mysqldump)"'
 const MONGOSH_BIN = '"$(command -v mongosh 2>/dev/null || command -v mongo 2>/dev/null || echo mongosh)"'
 
-interface DriverOpts {
+export interface DriverOpts {
   db?: string
   timeoutMs?: number
   maxBuffer?: number
@@ -266,7 +266,7 @@ async function myExec(ssh: SshClient, serverId: string, sql: string, o: DriverOp
   return ssh.exec(cmd, { sudo: true, stdin: sql, env, timeoutMs: o.timeoutMs ?? 60000, maxBuffer: o.maxBuffer, onStdout: o.onStdout, onStderr: o.onStderr, signal: o.signal })
 }
 
-async function myQuery(ssh: SshClient, serverId: string, sql: string, o: DriverOpts = {}): Promise<Grid> {
+export async function myQuery(ssh: SshClient, serverId: string, sql: string, o: DriverOpts = {}): Promise<Grid> {
   const r = await myExec(ssh, serverId, sql, o)
   if (r.code !== 0) throwExec('mysql', r, 'mysql failed')
   const lines = splitLines(r.stdout)
@@ -295,7 +295,7 @@ async function pgExec(ssh: SshClient, serverId: string, sql: string, o: DriverOp
   return ssh.exec(cmd, { sudo, stdin: sql, env, timeoutMs: o.timeoutMs ?? 60000, maxBuffer: o.maxBuffer, onStdout: o.onStdout, onStderr: o.onStderr, signal: o.signal })
 }
 
-async function pgQuery(ssh: SshClient, serverId: string, sql: string, o: DriverOpts = {}): Promise<Grid> {
+export async function pgQuery(ssh: SshClient, serverId: string, sql: string, o: DriverOpts = {}): Promise<Grid> {
   const r = await pgExec(ssh, serverId, sql, o)
   if (r.code !== 0) throwExec('postgres', r, 'psql failed')
   const lines = splitLines(r.stdout).filter((l) => !isPgTag(l))
@@ -324,7 +324,7 @@ const MONGO_PRELUDE = `var EJ = function (x, i) { try { return typeof EJSON !== 
 var PARSE = function (s) { if (!s || !String(s).trim()) return {}; return typeof EJSON !== 'undefined' ? EJSON.parse(s) : JSON.parse(s); };
 `
 
-async function mongoEval<T>(ssh: SshClient, serverId: string, js: string, o: DriverOpts = {}): Promise<T> {
+export async function mongoEval<T>(ssh: SshClient, serverId: string, js: string, o: DriverOpts = {}): Promise<T> {
   const script = `${MONGO_PRELUDE}\n(function(){\n${js}\n})();`
   const r = await ssh.exec(mongoCmd(serverId, script), { timeoutMs: o.timeoutMs ?? 60000, maxBuffer: o.maxBuffer, signal: o.signal })
   if (r.code !== 0) throwExec('mongo', r, 'mongosh failed')
@@ -438,7 +438,7 @@ const REDIS_CONF_FILES = ['/etc/redis/redis.conf', '/etc/redis.conf', '/etc/redi
 /** Error replies redis-cli prints in raw mode (the reply text without "(error)"). */
 const REDIS_ERR_RE = /^(ERR|NOAUTH|WRONGPASS|WRONGTYPE|NOPERM|MISCONF|READONLY|LOADING|BUSY|NOSCRIPT|OOM|EXECABORT|NOGROUP|CROSSSLOT|TRYAGAIN|CLUSTERDOWN|MOVED|ASK|MASTERDOWN|NOREPLICAS|UNBLOCKED|UNKILLABLE)\b/
 
-interface RedisOpts extends Omit<DriverOpts, 'db'> {
+export interface RedisOpts extends Omit<DriverOpts, 'db'> {
   /** Database index 0-15 (SELECT). */
   db?: number
   /** Human-readable (interactive style) output instead of --raw. */
@@ -479,7 +479,7 @@ async function redisExec(ssh: SshClient, serverId: string, args: string[], o: Re
 }
 
 /** Run one command in --raw mode and return stdout (without the trailing newline); throws on errors. */
-async function redisRun(ssh: SshClient, serverId: string, args: string[], o: RedisOpts = {}): Promise<string> {
+export async function redisRun(ssh: SshClient, serverId: string, args: string[], o: RedisOpts = {}): Promise<string> {
   const r = await redisExec(ssh, serverId, args, o)
   const out = r.stdout.replace(/\r\n/g, '\n').replace(/\n$/, '')
   const firstLine = out.split('\n')[0] ?? ''

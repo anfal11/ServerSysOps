@@ -5,6 +5,7 @@ import { SSHD_CONFIG_DUMP, assertPort, b64Echo, parseSshdConfig, shq, assertSafe
 import { installCmd, isInstalled, listUpgradable, refreshCmd, runPkg, upgradeAllCmd, pkgEnv } from './pkg'
 import { getServer } from '../store/servers'
 import { probeLogin } from '../ssh/probe'
+import { iptPersist } from './firewall'
 
 const SSHD_DROPIN = '/etc/ssh/sshd_config.d/00-serversysops.conf'
 const SSHD_PORT_DROPIN = '/etc/ssh/sshd_config.d/00-serversysops-port.conf'
@@ -33,25 +34,45 @@ async function isSocketActivated(ssh: SshClient): Promise<boolean> {
 }
 
 async function firewallBackend(ssh: SshClient): Promise<QuickActionsState['firewall']> {
+  // iptables counts as the active backend when neither front end is active and INPUT filters (policy DROP or any rule).
   const r = await ssh.exec(
-    `if command -v ufw >/dev/null 2>&1 && sudo -n ufw status 2>/dev/null | grep -q 'Status: active'; then echo ufw; elif systemctl is-active firewalld >/dev/null 2>&1; then echo firewalld; elif command -v ufw >/dev/null 2>&1; then echo ufw-inactive; else echo none; fi`
+    `export PATH="$PATH:/usr/sbin:/sbin"; if command -v ufw >/dev/null 2>&1 && sudo -n ufw status 2>/dev/null | grep -q 'Status: active'; then echo ufw; elif systemctl is-active firewalld >/dev/null 2>&1; then echo firewalld; elif command -v ufw >/dev/null 2>&1; then echo ufw-inactive; elif command -v iptables >/dev/null 2>&1 && { iptables -S INPUT 2>/dev/null || sudo -n iptables -S INPUT 2>/dev/null; } | grep -qE '^-P INPUT (DROP|REJECT)|^-A INPUT'; then echo iptables; else echo none; fi`
   )
   const v = r.stdout.trim()
   if (v === 'ufw') return 'ufw'
   if (v === 'firewalld') return 'firewalld'
+  if (v === 'iptables') return 'iptables'
   return 'none'
+}
+
+/** iptables: insert the SSH accept rule before the first match-less DROP/REJECT/LOG rule (or append), v4 and v6. */
+function iptSshRuleScript(port: number, add: boolean): string {
+  const spec = `-p tcp --dport ${port} -m comment --comment 'SSH (ServerSysOps)' -j ACCEPT`
+  const one = (bin: string): string =>
+    add
+      ? `${bin} -C INPUT ${spec} 2>/dev/null || { pos=$(${bin} -S INPUT 2>/dev/null | grep '^-A' | grep -nE -- '-j (DROP|REJECT|LOG)( |$)' | grep -vE -- ' -(s|d|i|o|p) |--dport|--ctstate' | head -1 | cut -d: -f1); if [ -n "$pos" ]; then ${bin} -I INPUT "$pos" ${spec}; else ${bin} -A INPUT ${spec}; fi; }`
+      : `while ${bin} -D INPUT ${spec} 2>/dev/null; do :; done`
+  return `${one('iptables')}; if command -v ip6tables >/dev/null 2>&1 && ip6tables -S INPUT >/dev/null 2>&1; then ${one('ip6tables')}; fi; true`
 }
 
 async function openFirewallPort(ssh: SshClient, port: number): Promise<void> {
   const fw = await firewallBackend(ssh)
   if (fw === 'ufw') await ssh.sudo(`ufw allow ${port}/tcp comment 'SSH (ServerSysOps)'`)
   if (fw === 'firewalld') await ssh.sudo(`firewall-cmd --permanent --add-port=${port}/tcp && firewall-cmd --reload`)
+  if (fw === 'iptables') {
+    await ssh.sudoRun(iptSshRuleScript(port, true))
+    await iptPersist(ssh)
+  }
 }
 
 async function closeFirewallPort(ssh: SshClient, port: number): Promise<void> {
   const fw = await firewallBackend(ssh)
   if (fw === 'ufw') await ssh.sudo(`ufw --force delete allow ${port}/tcp; ufw --force delete allow ${port}`)
   if (fw === 'firewalld') await ssh.sudo(`firewall-cmd --permanent --remove-port=${port}/tcp; firewall-cmd --permanent --remove-service=ssh; firewall-cmd --reload`)
+  if (fw === 'iptables') {
+    await ssh.sudoRun(iptSshRuleScript(port, false))
+    await iptPersist(ssh)
+  }
 }
 
 export function register(ctx: Ctx): void {

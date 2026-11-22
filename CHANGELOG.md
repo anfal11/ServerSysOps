@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 – 2026-11-22
+
+### New
+- **Traffic** page (System group): who is hitting the server, live. *Connections*: every remote IP with its connection count and the service or Docker container behind each port, listening ports with their process, "you" badge on your own session, optional reverse DNS. *Web server*: nginx, Apache and Caddy access logs found automatically; per time window the requests, unique IPs, bytes, status codes, requests per minute and the top client IPs with their paths and user agent, aggregated on the server; "Follow live" tails the log in the Tasks drawer. *Containers*: the real client IPs seen inside each container's network namespace. *Databases*: client IPs of MySQL/MariaDB, PostgreSQL, MongoDB and Redis on the host or in Docker, with users and databases when admin credentials are stored. Every IP row has Block, Whois and Copy.
+- **iptables / nftables firewall backend** for servers without ufw or firewalld: rule list, add and delete rules, safe enable (loopback, established, ICMP and SSH are allowed before INPUT is set to DROP, then the login is verified), default policies, presets, logging, persistence across reboots (iptables-persistent, iptables-services, OpenRC or iptables.service) with a one-click installer, Docker-aware (FORWARD, DOCKER chains and nat are never touched). ufw and firewalld keep working exactly as before.
+- **Blocked addresses** on the Firewall page: block or unblock an IP or CIDR on any backend; the app refuses to block the address your own SSH session comes from.
+
 ## 0.3.1 – 2026-11-22
 
 **Renamed:** Central Server is now **ServerSysOps**. Installed copies keep their servers, settings and snippets (data is migrated on first start), backup files made by the old name still import, and the installer replaces an existing Central Server install instead of adding a second app. Files the app writes on servers now use the `serversysops` prefix; two-factor auth, key-only logins, SSH hardening or runtime shims set up with 0.2.0/0.3.0 are not recognised under the old prefix and should be applied again from this version (the old files stay in place).

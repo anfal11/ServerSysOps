@@ -9,7 +9,13 @@ export interface FirewallRuleEx extends FirewallRule {
   iface?: string
 }
 
-export type FwBackend = 'ufw' | 'firewalld'
+/**
+ * ufw / firewalld manage the firewall through their own front end; `iptables` manages the kernel
+ * tables directly (used when neither of the others is installed, e.g. Debian/Ubuntu minimal, Docker
+ * hosts, Alpine, older CentOS). On nftables-only hosts (no iptables binary) the iptables backend is
+ * read-only until `iptables` (nft-backed on modern distros) is installed.
+ */
+export type FwBackend = 'ufw' | 'firewalld' | 'iptables'
 export type FwAction = 'allow' | 'deny' | 'reject' | 'limit'
 export type FwProto = 'tcp' | 'udp' | 'any'
 export type FwDirection = 'in' | 'out'
@@ -26,13 +32,21 @@ export interface FirewalldZone {
   target: string
 }
 
-export interface FirewallStateEx extends FirewallState {
+/** Chain policies of the filter table (iptables backend). */
+export interface IptPolicies {
+  input: FwPolicy
+  forward: FwPolicy
+  output: FwPolicy
+}
+
+export interface FirewallStateEx extends Omit<FirewallState, 'backend' | 'rules'> {
+  backend: FwBackend | 'none'
   rules: FirewallRuleEx[]
   /** Which backends are present on the server. */
   backendAvailable: FwBackend[]
   /** True when a backend can be installed with the package manager. */
   installable: boolean
-  /** Service is enabled at boot (ufw: ufw service / firewalld: systemctl is-enabled). */
+  /** Service is enabled at boot (ufw: ufw service / firewalld: systemctl is-enabled / iptables: persistence set up). */
   enabledAtBoot: boolean
   logging: string
   /** firewalld only. */
@@ -45,6 +59,26 @@ export interface FirewallStateEx extends FirewallState {
   /** Recommended backend for this distro when nothing is installed. */
   recommended: FwBackend
   version?: string
+
+  // ---- iptables backend ----
+  /** `iptables` is the nf_tables variant (iptables-nft), or only `nft` exists. */
+  nftBackend?: boolean
+  /** Only `nft` exists (no iptables binary): rules are listed read-only from `nft list ruleset`. */
+  nftOnly?: boolean
+  /** ip6tables is usable on this host. */
+  ip6?: boolean
+  /** Chain policies of the filter table (v4). */
+  policies?: IptPolicies
+  /** Number of rules in INPUT (v4 + v6). */
+  ruleCount?: number
+  /** Rules are saved and restored at boot (netfilter-persistent / iptables-services / OpenRC / iptables.service). */
+  persistent?: boolean
+  /** Which persistence mechanism was detected (also when not enabled). */
+  persistMethod?: string
+  /** Docker chains exist: FORWARD / DOCKER-USER and the nat table are never touched. */
+  docker?: boolean
+  /** Raw rule dump (`iptables-save` + `ip6tables-save`, or `nft list ruleset`). */
+  raw?: string
 }
 
 export interface AddRuleInput {
@@ -54,7 +88,7 @@ export interface AddRuleInput {
   proto?: FwProto
   /** Source IP or CIDR. */
   from?: string
-  /** Destination IP or CIDR (ufw only). */
+  /** Destination IP or CIDR (ufw and iptables). */
   to?: string
   comment?: string
   direction?: FwDirection
@@ -94,4 +128,26 @@ export interface ExposedPort extends ListeningPort {
   allowed: boolean
   /** Listens on a non-loopback address. */
   public: boolean
+}
+
+// ---- generic block / unblock of an address (works on every backend; used by the Traffic page) ----
+
+export interface BlockIpInput {
+  /** IPv4 / IPv6 address or CIDR. */
+  ip: string
+  comment?: string
+}
+
+export interface UnblockIpInput {
+  ip: string
+}
+
+export interface BlockedIp {
+  /** Address or CIDR as the firewall reports it (host masks /32 and /128 are stripped). */
+  ip: string
+  /** Comment without the `ServerSysOps block:` prefix. */
+  comment?: string
+  /** Backend-specific rule text (same as the matching FirewallRuleEx.raw). */
+  raw: string
+  v6: boolean
 }

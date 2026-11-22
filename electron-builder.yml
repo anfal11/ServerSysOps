@@ -41,5 +41,5 @@ linux:
 publish:
   provider: github
   owner: anfal11
-  repo: ServerMate
+  repo: CentralServer
 npmRebuild: false

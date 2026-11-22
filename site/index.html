@@ -79,7 +79,7 @@
       <nav>
         <a href="#features">Features</a>
         <a href="#install">Install</a>
-        <a href="https://github.com/anfal11/ServerMate" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/anfal11/CentralServer" target="_blank" rel="noopener">GitHub</a>
       </nav>
     </div>
   </header>
@@ -88,13 +88,13 @@
     <h1>Manage your Linux servers<br />from one Windows app</h1>
     <p>Overview, terminal, files, Docker, web server, databases, firewall, users, cron, security audit and two-factor auth. Everything works over plain SSH – nothing to install on the server.</p>
     <div class="cta">
-      <a class="btn primary" id="dl-setup" href="https://github.com/anfal11/ServerMate/releases/latest">
+      <a class="btn primary" id="dl-setup" href="https://github.com/anfal11/CentralServer/releases/latest">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Download for Windows
       </a>
-      <a class="btn" id="dl-portable" href="https://github.com/anfal11/ServerMate/releases/latest">Portable .exe (no install)</a>
+      <a class="btn" id="dl-portable" href="https://github.com/anfal11/CentralServer/releases/latest">Portable .exe (no install)</a>
     </div>
-    <div class="meta" id="meta">Free and open source · Windows 10/11 (64-bit) · <a href="https://github.com/anfal11/ServerMate/releases" target="_blank" rel="noopener">all releases</a></div>
+    <div class="meta" id="meta">Free and open source · Windows 10/11 (64-bit) · <a href="https://github.com/anfal11/CentralServer/releases" target="_blank" rel="noopener">all releases</a></div>
 
     <div class="shot" aria-hidden="true">
       <div class="bar"><span></span><span></span><span></span></div>
@@ -157,12 +157,12 @@
   </section>
 
   <footer>
-    <div class="wrap">Central Server is MIT licensed · <a href="https://github.com/anfal11/ServerMate" target="_blank" rel="noopener">Source code</a> · <a href="https://github.com/anfal11/ServerMate/issues" target="_blank" rel="noopener">Report a bug</a></div>
+    <div class="wrap">Central Server is MIT licensed · <a href="https://github.com/anfal11/CentralServer" target="_blank" rel="noopener">Source code</a> · <a href="https://github.com/anfal11/CentralServer/issues" target="_blank" rel="noopener">Report a bug</a></div>
   </footer>
 
   <script>
     // Point the buttons at the newest release assets (falls back to the releases page).
-    fetch('https://api.github.com/repos/anfal11/ServerMate/releases/latest')
+    fetch('https://api.github.com/repos/anfal11/CentralServer/releases/latest')
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((rel) => {
         const assets = rel.assets || []

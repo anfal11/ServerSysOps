@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 - 2026-11-22
+
+### Fixed
+- **Missing shortcuts after updating from Central Server.** The in-app update across the rename removed the old "Central Server" Start-menu and desktop shortcuts without creating new ones (the installer keeps shortcuts only when the exe stays in the same folder). The app now recreates its Start-menu entry (and the desktop shortcut) once on start when none exists. If you updated already and cannot find the app in Start, launch ServerSysOps.exe from its install folder once, or run the installer again.
+
 ## 0.4.0 – 2026-11-22
 
 ### New

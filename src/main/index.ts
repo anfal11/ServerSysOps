@@ -26,7 +26,7 @@ import * as pkgupdates from './services/pkgupdates'
 import * as updater from './services/updater'
 import * as backup from './services/backup'
 import * as traffic from './services/traffic'
-import { APP_ID, APP_NAME, appIcon, migrateLegacyUserData } from './branding'
+import { APP_ID, APP_NAME, appIcon, migrateLegacyUserData, repairShortcuts } from './branding'
 
 const isDev = !app.isPackaged
 let mainWindow: BrowserWindow | null = null
@@ -71,6 +71,7 @@ function createWindow(): void {
 app.whenReady().then(() => {
   app.setAppUserModelId(APP_ID)
   migrateLegacyUserData()
+  repairShortcuts()
   nativeTheme.themeSource = 'dark'
   Menu.setApplicationMenu(null)
 

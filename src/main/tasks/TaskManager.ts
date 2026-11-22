@@ -87,8 +87,12 @@ export class TaskManager extends EventEmitter {
         if (t) {
           t.status = ac.signal.aborted ? 'cancelled' : 'failed'
           t.finishedAt = Date.now()
-          t.error = e instanceof Error ? e.message : String(e)
-          this.appendLog(id, `\n[error] ${t.error}\n`)
+          if (ac.signal.aborted) {
+            this.appendLog(id, `\n[cancelled]\n`)
+          } else {
+            t.error = e instanceof Error ? e.message : String(e)
+            this.appendLog(id, `\n[error] ${t.error}\n`)
+          }
         }
         this.emitUpdate(id, true)
         throw e
@@ -110,6 +114,8 @@ export class TaskManager extends EventEmitter {
   }
 
   cancel(id: string): void {
+    const t = this.tasks.get(id)
+    if (t && t.status === 'running') this.appendLog(id, `\n[cancelling…]\n`)
     this.aborts.get(id)?.abort()
   }
 

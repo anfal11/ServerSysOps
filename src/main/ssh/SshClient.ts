@@ -1,6 +1,7 @@
 import { Client, type ClientChannel, type ConnectConfig, type SFTPWrapper } from 'ssh2'
 import { EventEmitter } from 'events'
 import { readFileSync } from 'fs'
+import { randomBytes } from 'crypto'
 import type { ExecResult, OsInfo, PkgManager, ServerProfile, ServerSecrets } from '@shared/types'
 import { checkHostKey, rememberHostKey, type HostKeyVerdict } from './hostkeys'
 import { shq } from './shell'
@@ -37,6 +38,30 @@ export class SshError extends Error {
 }
 
 const SUDO_PROMPT = '__SM_SUDO_PROMPT__'
+
+/** How long a cancelled/timed-out command may take to report its exit before the channel is dropped locally. */
+const ABORT_GRACE_MS = 2000
+
+/**
+ * Wrap a command so it runs in its own session/process group and announces the group leader's pid as the
+ * first stdout line ("<token> <pid>"). Cancelling then kills the whole process tree with one `kill -- -pid`.
+ * Without this, sshd's "signal" request reaches only the login shell, which defers it until the foreground
+ * command exits, and closing the channel does nothing to a command that is not writing (e.g. `docker logs -f`
+ * of a quiet container) — the task would hang until the container next logged a line.
+ */
+function killableWrap(cmd: string, token: string): string {
+  const inner = `echo ${shq(token)} "$$"; ${cmd}`
+  const sh = '"${SHELL:-/bin/sh}"'
+  return `( set -- ${shq(inner)}; if command -v setsid >/dev/null 2>&1; then exec setsid ${sh} -c "$1"; else exec ${sh} -c "$1"; fi )`
+}
+
+/** Remote command that terminates the process group `pid` (TERM, then KILL after a short grace). */
+function killGroupCmd(pid: number): string {
+  const p = String(pid)
+  const term = `kill -TERM -- -${p} 2>/dev/null || kill -TERM -${p} 2>/dev/null || { pkill -TERM -P ${p} 2>/dev/null; kill -TERM ${p} 2>/dev/null; }`
+  const kill9 = `kill -KILL -- -${p} 2>/dev/null || kill -KILL -${p} 2>/dev/null || { pkill -KILL -P ${p} 2>/dev/null; kill -KILL ${p} 2>/dev/null; }`
+  return `${term}; sleep 2; ${kill9}; true`
+}
 
 /**
  * Wrapper around a single ssh2 connection with exec/sudo/shell/sftp helpers.
@@ -227,8 +252,18 @@ export class SshClient extends EventEmitter {
         .join('; ')
       cmd = `${exports}; ${cmd}`
     }
+    const timeoutMs = opts.timeoutMs ?? 120000
+    const maxBuffer = opts.maxBuffer ?? 8 * 1024 * 1024
+    // A cancelled task must not start further commands (the abort listener below only fires on a later abort).
+    if (opts.signal?.aborted) throw new SshError('ABORTED', 'Cancelled')
+    // Commands that can be cancelled (or that have a timeout) run in their own process group so they can be
+    // killed for real; see killableWrap().
+    const killable = (!!opts.signal || timeoutMs > 0) && !opts.pty
+    const pidToken = killable ? `__cs${randomBytes(6).toString('hex')}__` : ''
+    if (killable) cmd = killableWrap(cmd, pidToken)
     let sudoPw: string | undefined
-    if (opts.sudo && !this.os?.isRoot) {
+    const useSudo = !!opts.sudo && !this.os?.isRoot
+    if (useSudo) {
       if (!this.os?.sudoAvailable) throw new SshError('SUDO_FAILED', 'sudo is not available on this server')
       // Always run the whole command through `sh -c` so multi-statement scripts, pipes and
       // redirections are elevated as a unit (not just the first word).
@@ -243,10 +278,6 @@ export class SshClient extends EventEmitter {
         cmd = `sudo -S -k -H -p ${shq(SUDO_PROMPT)} ${wrapped}`
       }
     }
-    const timeoutMs = opts.timeoutMs ?? 120000
-    const maxBuffer = opts.maxBuffer ?? 8 * 1024 * 1024
-    // A cancelled task must not start further commands (the abort listener below only fires on a later abort).
-    if (opts.signal?.aborted) throw new SshError('ABORTED', 'Cancelled')
     return new Promise<ExecResult>((resolve, reject) => {
       c.exec(cmd, { pty: opts.pty ? { term: 'xterm', cols: 200, rows: 50 } : undefined }, (err, stream) => {
         if (err) return reject(new SshError('EXEC', err.message))
@@ -259,9 +290,40 @@ export class SshClient extends EventEmitter {
         let onAbort: (() => void) | undefined
         let finished = false
         let sawPrompt = false
+        let graceTimer: NodeJS.Timeout | undefined
+        let remotePid = 0
+        let pidBuf: Buffer | null = killable ? Buffer.alloc(0) : null
+        let killed = false
         const cleanup = (): void => {
           if (timer) clearTimeout(timer)
+          if (graceTimer) clearTimeout(graceTimer)
           if (onAbort && opts.signal) opts.signal.removeEventListener('abort', onAbort)
+        }
+        /** Kill the remote process group (once) and drop the channel locally if the remote side stays quiet. */
+        const killRemote = (why: 'ABORTED' | 'TIMEOUT', message: string): void => {
+          if (killed) return
+          killed = true
+          if (remotePid > 0) {
+            // Separate channel; never carries the task's signal (it must run even though the task is aborted).
+            this.exec(killGroupCmd(remotePid), { sudo: useSudo, timeoutMs: 15000 }).catch(() => {})
+          }
+          try {
+            stream.signal('TERM')
+            stream.close()
+          } catch {
+            /* ignore */
+          }
+          graceTimer = setTimeout(() => {
+            if (finished) return
+            finished = true
+            cleanup()
+            try {
+              stream.destroy()
+            } catch {
+              /* ignore */
+            }
+            reject(new SshError(why, message))
+          }, ABORT_GRACE_MS)
         }
         const finish = (): void => {
           if (finished) return
@@ -288,37 +350,38 @@ export class SshClient extends EventEmitter {
         }
         if (timeoutMs > 0) {
           timer = setTimeout(() => {
-            try {
-              stream.close()
-              stream.destroy()
-            } catch {
-              /* ignore */
-            }
-            if (!finished) {
-              finished = true
-              cleanup()
-              reject(new SshError('TIMEOUT', `Command timed out after ${Math.round(timeoutMs / 1000)}s: ${command.slice(0, 120)}`))
-            }
+            timer = undefined
+            killRemote('TIMEOUT', `Command timed out after ${Math.round(timeoutMs / 1000)}s: ${command.slice(0, 120)}`)
           }, timeoutMs)
         }
         if (opts.signal) {
           // Removed again in cleanup(): a task reuses one signal for many commands, so listeners must not accumulate.
-          onAbort = (): void => {
-            try {
-              stream.signal('TERM')
-              stream.close()
-            } catch {
-              /* ignore */
-            }
-          }
+          onAbort = (): void => killRemote('ABORTED', 'Cancelled')
           opts.signal.addEventListener('abort', onAbort, { once: true })
         }
-        stream.on('data', (d: Buffer) => {
+        const onData = (d: Buffer): void => {
           if (outLen < maxBuffer) {
             out.push(d)
             outLen += d.length
           }
           opts.onStdout?.(d.toString('utf8'))
+        }
+        stream.on('data', (d: Buffer) => {
+          if (pidBuf === null) return onData(d)
+          // First stdout line is the pid announcement of killableWrap(); strip it and remember the pid.
+          pidBuf = Buffer.concat([pidBuf, d])
+          const nl = pidBuf.indexOf(10)
+          if (nl === -1 && pidBuf.length < 160) return
+          let rest = pidBuf
+          if (nl !== -1) {
+            const m = /^(\S+) (\d+)\r?$/.exec(pidBuf.subarray(0, nl).toString('utf8'))
+            if (m && m[1] === pidToken) {
+              remotePid = Number(m[2])
+              rest = pidBuf.subarray(nl + 1)
+            }
+          }
+          pidBuf = null
+          if (rest.length) onData(rest)
         })
         stream.stderr.on('data', (d: Buffer) => {
           const s = d.toString('utf8')

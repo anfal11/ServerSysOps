@@ -1,8 +1,8 @@
-# Builds the Windows and macOS packages for a version tag and attaches them to a DRAFT GitHub release
-# named after the tag. Publishing the draft (adding the notes from CHANGELOG.md) is the manual step; the
-# website and the in-app updater pick the release up once it is published.
+# Builds the Windows and macOS packages for a version tag and attaches them to ONE draft GitHub release
+# whose notes are the matching section of CHANGELOG.md. Publishing the draft is the manual step; the website
+# and the in-app updater pick the release up once it is published.
 #
-# Trigger: `git push origin vX.Y.Z` (or run it by hand from the Actions tab).
+# Trigger: `git push origin vX.Y.Z`. A manual run from the Actions tab only builds (artifacts, no release).
 name: Release
 
 on:
@@ -14,8 +14,36 @@ permissions:
   contents: write
 
 jobs:
+  # The draft is created once, before the builds, so the two parallel electron-builder runs both upload into
+  # the same release instead of racing to create their own.
+  draft:
+    name: Draft release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create or update the draft with the changelog section
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="$GITHUB_REF_NAME"
+          VERSION="${TAG#v}"
+          # Lines of the "## <version> ..." section of CHANGELOG.md, without the heading.
+          awk -v v="$VERSION" '/^## /{p = ($2 == v)} p' CHANGELOG.md | tail -n +2 > notes.md
+          if [ ! -s notes.md ]; then echo "ServerSysOps $VERSION" > notes.md; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --draft --title "ServerSysOps $VERSION" --notes-file notes.md
+          else
+            gh release create "$TAG" --draft --verify-tag --title "ServerSysOps $VERSION" --notes-file notes.md
+          fi
+
   build:
     name: ${{ matrix.name }}
+    needs: draft
+    # Also run when the draft job was skipped (manual run on a branch).
+    if: always() && (needs.draft.result == 'success' || needs.draft.result == 'skipped')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -41,8 +69,8 @@ jobs:
       - name: Build renderer and main
         run: npm run build
 
-      - name: Package and upload to the draft release
-        run: npx electron-builder ${{ matrix.args }} --publish always
+      - name: Package (and upload to the draft release on a tag)
+        run: npx electron-builder ${{ matrix.args }} --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # No certificates: never try to look one up (macOS) or sign (Windows).

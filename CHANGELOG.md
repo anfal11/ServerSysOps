@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 - 2026-11-22
+
+### Fixed
+- Release pipeline: the Windows and macOS builds raced to create the draft release and ended up in two separate drafts. The draft is now created first, with the notes taken from this changelog, and both builds upload into it. Same app as 0.5.0 otherwise.
+
 ## 0.5.0 - 2026-11-22
 
 ### New

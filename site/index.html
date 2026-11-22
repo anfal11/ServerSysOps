@@ -184,7 +184,7 @@
   </section>
 
   <footer>
-    <div class="wrap">© <span id="year"></span> Anfal Ratul · ServerSysOps is free to use · Not affiliated with any Linux distribution or Microsoft</div>
+        <div class="wrap">© <span id="year"></span> Anfal Ratul · ServerSysOps is free to use · Not affiliated with any Linux distribution or Microsoft</div>
   </footer>
 
   <script>
@@ -210,6 +210,56 @@
         document.getElementById('meta').insertAdjacentHTML('afterbegin', 'Version <code>' + rel.tag_name.replace(/^v/, '') + '</code> · released ' + new Date(rel.published_at).toLocaleDateString() + ' · ')
       })
       .catch(() => {})
+  </script>
+  <script>
+    // Visitor analytics -> /api/e (own Vercel function; see stats.html).
+    // Your own visits: open the site once with ?notrack=1 to stop counting this browser (?notrack=0 to undo).
+    ;(function () {
+      try {
+        var q = new URLSearchParams(location.search)
+        if (q.get('notrack') === '1') localStorage.setItem('sso_notrack', '1')
+        if (q.get('notrack') === '0') localStorage.removeItem('sso_notrack')
+        if (localStorage.getItem('sso_notrack') === '1' || navigator.webdriver) return
+      } catch (e) {}
+      function rid() { return Math.random().toString(36).slice(2) + Date.now().toString(36) }
+      var vid
+      try { vid = localStorage.getItem('sso_vid') || rid(); localStorage.setItem('sso_vid', vid) } catch (e) { vid = rid() }
+      var sid = rid(), start = Date.now(), maxScroll = 0, seen = {}
+      function send(t, extra) {
+        var d = { t: t, vid: vid, sid: sid, path: location.pathname }
+        for (var k in extra) d[k] = extra[k]
+        var body = JSON.stringify(d)
+        if (navigator.sendBeacon && navigator.sendBeacon('/api/e', body)) return
+        fetch('/api/e', { method: 'POST', body: body, keepalive: true }).catch(function () {})
+      }
+      function scrollPct() {
+        var h = document.documentElement.scrollHeight - innerHeight
+        return h <= 0 ? 100 : Math.min(100, Math.round((scrollY / h) * 100))
+      }
+      var p = new URLSearchParams(location.search), utm = []
+      ;['utm_source', 'utm_medium', 'utm_campaign'].forEach(function (k) { if (p.get(k)) utm.push(k.slice(4) + '=' + p.get(k)) })
+      send('view', { ref: document.referrer || '', utm: utm.join('&'), lang: navigator.language, screen: screen.width + 'x' + screen.height })
+
+      addEventListener('scroll', function () { var s = scrollPct(); if (s > maxScroll) maxScroll = s }, { passive: true })
+      if ('IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function (es) {
+          es.forEach(function (e) {
+            var id = e.target.id
+            if (e.isIntersecting && !seen[id]) { seen[id] = 1; send('section', { target: id }) }
+          })
+        }, { threshold: 0.4 })
+        ;['features', 'install', 'creator'].forEach(function (id) { var el = document.getElementById(id); if (el) io.observe(el) })
+      }
+      var DL = { 'dl-setup': 'windows-installer', 'dl-portable': 'windows-portable', 'dl-mac-arm': 'mac-apple-silicon', 'dl-mac-x64': 'mac-intel' }
+      document.addEventListener('click', function (ev) {
+        var a = ev.target.closest && ev.target.closest('a')
+        if (!a) return
+        if (DL[a.id]) send('download', { target: DL[a.id], href: a.href })
+        else if (/^https?:/.test(a.href) && a.host !== location.host) send('click', { target: (a.title || a.textContent || '').trim().slice(0, 40), href: a.href })
+      })
+      function leave() { send('leave', { scroll: Math.max(maxScroll, scrollPct()), dur: Math.round((Date.now() - start) / 1000), sections: Object.keys(seen) }) }
+      document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') leave() })
+    })()
   </script>
 </body>
 </html>

@@ -110,8 +110,8 @@ export default function Security({ serverId }: PageProps): React.JSX.Element {
         setSshModal(true)
         return
       case 'fail2ban':
-        if (!(await confirm({ title: 'Install & configure Fail2ban', message: <>Install fail2ban (if missing) and protect the SSH port <b>{port}</b>: ban an IP for 1 hour after 5 failed logins within 10 minutes. Your current IP is not whitelisted automatically; you can add it later from Overview → Quick actions.</>, confirmLabel: 'Install & enable' }))) return
-        await run(() => api.call('qa:fail2banSetup', serverId, { maxretry: 5, findtime: '10m', bantime: '1h', ignoreip: '', sshPorts: [port] }).then(() => taskToast('Setting up Fail2ban…')))
+        if (!(await confirm({ title: 'Install & configure Fail2ban', message: <>Install fail2ban (if missing) and protect the SSH port <b>{port}</b>: ban an IP for 1 hour after 5 failed logins within 10 minutes, longer on every repeat (up to a week), aggressive mode, bans through the active firewall. Your current IP is not whitelisted automatically; you can add it later from Overview → Quick actions.</>, confirmLabel: 'Install & enable' }))) return
+        await run(() => api.call('qa:fail2banSetup', serverId, { maxretry: 5, findtime: '10m', bantime: '1h', ignoreip: '', sshPorts: [port], increment: true, maxtime: '1w', aggressive: true }).then(() => taskToast('Setting up Fail2ban…')))
         return
       case 'firewall':
         useApp.getState().setPage(serverId, 'firewall')

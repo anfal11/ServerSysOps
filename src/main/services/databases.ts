@@ -879,7 +879,7 @@ function parseSections(out: string): Record<string, string[]> {
   const sec: Record<string, string[]> = {}
   let cur = ''
   for (const line of out.split('\n')) {
-    const m = line.match(/^__([A-Z]+)$/)
+    const m = line.match(/^__([A-Z0-9]+)$/)
     if (m) {
       cur = m[1]
       sec[cur] = []

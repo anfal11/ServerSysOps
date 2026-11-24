@@ -86,7 +86,7 @@ echo __SSHDCFG; ${SSHD_CONFIG_DUMP}
 echo __LISTEN; (ss -tlnH 2>/dev/null || netstat -tln 2>/dev/null) | awk '{print $4}' | sed 's/.*://' | sort -un | tr '\\n' ' '
 echo __SOCKET; systemctl is-active ssh.socket 2>/dev/null
 echo __UU; if [ -f /etc/apt/apt.conf.d/20auto-upgrades ]; then grep -E 'Unattended-Upgrade' /etc/apt/apt.conf.d/20auto-upgrades | grep -oE '"[0-9]+"' | tr -d '"'; elif systemctl is-enabled dnf-automatic.timer >/dev/null 2>&1; then echo 1; elif command -v apt-get >/dev/null 2>&1 || command -v dnf >/dev/null 2>&1; then echo 0; else echo NA; fi
-echo __F2B; if command -v fail2ban-client >/dev/null 2>&1; then echo installed; systemctl is-active fail2ban 2>/dev/null; sudo -n fail2ban-client status sshd 2>/dev/null | grep -E 'Currently banned' | awk '{print $NF}'; grep -hE '^(maxretry|findtime|bantime|ignoreip)\\s*=' /etc/fail2ban/jail.d/serversysops.local /etc/fail2ban/jail.local 2>/dev/null; else echo missing; fi
+echo __F2B; if command -v fail2ban-client >/dev/null 2>&1; then echo installed; systemctl is-active fail2ban 2>/dev/null; sudo -n fail2ban-client status sshd 2>/dev/null | grep -E 'Currently banned' | awk '{print $NF}'; grep -hE '^(maxretry|findtime|bantime|bantime\\.increment|bantime\\.maxtime|ignoreip|banaction|mode)\\s*=' /etc/fail2ban/jail.local /etc/fail2ban/jail.d/*.conf /etc/fail2ban/jail.d/*.local 2>/dev/null; else echo missing; fi
 echo __HOST; hostname
 echo __TZ; timedatectl show -p Timezone -p NTP -p NTPSynchronized --value 2>/dev/null || cat /etc/timezone 2>/dev/null
 echo __SWAP; cat /proc/swaps | tail -n +2; echo "SWAPPINESS=$(cat /proc/sys/vm/swappiness)"
@@ -105,7 +105,7 @@ echo __END`
     const sec: Record<string, string[]> = {}
     let cur = ''
     for (const line of r.stdout.split('\n')) {
-      const m = line.match(/^__([A-Z]+)$/)
+      const m = line.match(/^__([A-Z0-9]+)$/)
       if (m) {
         cur = m[1]
         sec[cur] = []
@@ -124,7 +124,7 @@ echo __END`
     const f2bInstalled = f2b[0]?.trim() === 'installed'
     const f2bConf: Record<string, string> = {}
     for (const l of f2b.slice(1)) {
-      const m = l.match(/^(\w+)\s*=\s*(.*)$/)
+      const m = l.match(/^([\w.]+)\s*=\s*(.*)$/)
       if (m) f2bConf[m[1]] = m[2].trim()
     }
     const bannedLine = f2b.find((l) => /^\d+$/.test(l.trim()))
@@ -157,6 +157,10 @@ echo __END`
         findtime: f2bConf.findtime,
         bantime: f2bConf.bantime,
         ignoreip: f2bConf.ignoreip,
+        increment: f2bConf['bantime.increment'] ? /^(true|yes|1|on)$/i.test(f2bConf['bantime.increment']) : undefined,
+        maxtime: f2bConf['bantime.maxtime'],
+        mode: f2bConf.mode,
+        banaction: f2bConf.banaction,
         bannedCount: bannedLine ? Number(bannedLine) : undefined
       },
       hostname: (sec.HOST?.[0] ?? '').trim(),
@@ -338,7 +342,7 @@ echo __END`
   })
 
   // ---------------- Fail2ban ----------------
-  ctx.handle('qa:fail2banSetup', async (serverId: string, cfg: { maxretry: number; findtime: string; bantime: string; ignoreip: string; sshPorts: number[] }) => {
+  ctx.handle('qa:fail2banSetup', async (serverId: string, cfg: { maxretry: number; findtime: string; bantime: string; ignoreip: string; sshPorts: number[]; increment?: boolean; maxtime?: string; aggressive?: boolean }) => {
     const ssh = ctx.ssh(serverId)
     const okTime = (s: string): string => {
       if (!/^-?\d+[smhdw]?$/.test(s.trim())) throw new Error(`Invalid time: ${s}`)
@@ -353,25 +357,61 @@ echo __END`
       })
     const ports = (cfg.sshPorts ?? []).map(assertPort)
     const maxretry = Number.isInteger(cfg.maxretry) && cfg.maxretry >= 1 ? cfg.maxretry : 5
-    const jail = `# Managed by ServerSysOps\n[DEFAULT]\nignoreip = 127.0.0.1/8 ::1 ${ignore.join(' ')}\nbantime = ${okTime(cfg.bantime)}\nfindtime = ${okTime(cfg.findtime)}\nmaxretry = ${maxretry}\nbanaction = %(banaction_allports)s\n\n[sshd]\nenabled = true\nport = ${ports.join(',') || 'ssh'}\nbackend = systemd\n`
+    const increment = cfg.increment !== false
+    const maxtime = okTime(cfg.maxtime || '1w')
+    const aggressive = cfg.aggressive !== false
     const { id } = ctx.tasks.start('Install & configure Fail2ban', serverId, async (h) => {
       if (!(await isInstalled(ssh, 'fail2ban'))) {
         h.log('Installing fail2ban…')
-        await runPkg(ssh, installCmd(ssh, ['fail2ban']), { onStdout: (c) => h.append(c), onStderr: (c) => h.append(c) })
+        await runPkg(ssh, installCmd(ssh, ['fail2ban']), { signal: h.signal, onStdout: (c) => h.append(c), onStderr: (c) => h.append(c) })
       }
+      // Ban through the firewall that is actually in use, so bans survive firewall reloads and show up in
+      // its rule list: ufw -> the "ufw" action, firewalld -> rich rules; otherwise fail2ban's own
+      // iptables/nftables all-ports chains.
+      const fw = await firewallBackend(ssh)
+      const banaction = fw === 'ufw' ? ['banaction = ufw', 'banaction_allports = ufw'] : fw === 'firewalld' ? ['banaction = firewallcmd-rich-rules', 'banaction_allports = firewallcmd-allports'] : ['banaction = %(banaction_allports)s']
+      const backend = ssh.os?.hasSystemd ? 'systemd' : 'auto'
+      const jail = [
+        '# Managed by ServerSysOps',
+        '[DEFAULT]',
+        `ignoreip = 127.0.0.1/8 ::1 ${ignore.join(' ')}`.trim(),
+        `bantime = ${okTime(cfg.bantime)}`,
+        `findtime = ${okTime(cfg.findtime)}`,
+        `maxretry = ${maxretry}`,
+        `bantime.increment = ${increment ? 'true' : 'false'}`,
+        ...(increment ? [`bantime.maxtime = ${maxtime}`] : []),
+        ...banaction,
+        '',
+        '[sshd]',
+        'enabled = true',
+        `port = ${ports.join(',') || 'ssh'}`,
+        `backend = ${backend}`,
+        `mode = ${aggressive ? 'aggressive' : 'normal'}`,
+        ''
+      ].join('\n')
+      h.log(`Firewall backend: ${fw} -> ${banaction[0]}`)
       h.log('Writing /etc/fail2ban/jail.d/serversysops.local…')
       await writeRootFile(ssh, '/etc/fail2ban/jail.d/serversysops.local', jail)
+      h.log('$ fail2ban-client -t')
+      const test = await ssh.sudo('fail2ban-client -t 2>&1')
+      h.log((test.stdout + test.stderr).trim())
+      // -t exists since fail2ban 0.10; older releases reject the option, which is not a config error.
+      if (test.code !== 0 && !/invalid option|unrecognized|usage:/i.test(test.stdout + test.stderr)) {
+        throw new Error('fail2ban rejected the configuration (see the output above); the service was not restarted')
+      }
+      h.log('$ systemctl enable --now fail2ban && systemctl restart fail2ban')
       await ssh.sudoRun('systemctl enable --now fail2ban && systemctl restart fail2ban')
-      await new Promise((r) => setTimeout(r, 1500))
-      const st = await ssh.sudo('fail2ban-client status sshd 2>&1')
-      h.log(st.stdout + st.stderr)
-      ctx.audit(serverId, 'fail2ban.setup', `maxretry=${cfg.maxretry} bantime=${cfg.bantime}`)
+      await new Promise((r) => setTimeout(r, 2000))
+      const st = await ssh.sudo('fail2ban-client status 2>&1; echo; fail2ban-client status sshd 2>&1')
+      h.log((st.stdout + st.stderr).trim())
+      if (!/Jail list:.*sshd/s.test(st.stdout)) throw new Error('fail2ban is running but the sshd jail is not active (see the output above)')
+      ctx.audit(serverId, 'fail2ban.setup', `maxretry=${maxretry} findtime=${cfg.findtime} bantime=${cfg.bantime}${increment ? ` increment<=${maxtime}` : ''} mode=${aggressive ? 'aggressive' : 'normal'} banaction=${fw}`)
     })
     return id
   })
   ctx.handle('qa:fail2banStatus', async (serverId: string) => {
     const ssh = ctx.ssh(serverId)
-    const r = await ssh.sudo('fail2ban-client status sshd 2>&1; echo; fail2ban-client banned 2>/dev/null')
+    const r = await ssh.sudo('fail2ban-client status 2>&1; echo; fail2ban-client status sshd 2>&1; echo; fail2ban-client banned 2>/dev/null')
     return r.stdout + r.stderr
   })
   ctx.handle('qa:fail2banUnban', async (serverId: string, ip: string) => {
@@ -453,7 +493,7 @@ echo __END`
     const sec: Record<string, string> = {}
     let cur = ''
     for (const line of r.stdout.split('\n')) {
-      const m = line.match(/^__([A-Z]+)$/)
+      const m = line.match(/^__([A-Z0-9]+)$/)
       if (m) cur = m[1]
       else if (cur && line.trim()) sec[cur] = (sec[cur] ? sec[cur] + ' ' : '') + line.trim()
     }

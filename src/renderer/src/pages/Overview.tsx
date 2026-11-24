@@ -122,7 +122,7 @@ export default function Overview({ serverId }: PageProps): React.JSX.Element {
                       valueSub={q?.updates.lastChecked ? `Checked ${q.updates.lastChecked}` : ''}
                       action={<Button onClick={() => setDialog('updates')} variant={q && q.updates.count > 0 ? 'primary' : 'default'}>{q && q.updates.count > 0 ? 'Install' : 'Check'}</Button>}
                     />
-                    <Row icon={<ShieldAlert />} title="Fail2ban" value={q ? (q.fail2ban.installed ? (q.fail2ban.running ? 'Active' : 'Installed, stopped') : 'Not installed') : '…'} valueSub={q?.fail2ban.installed ? `${q.fail2ban.bannedCount ?? 0} banned · ${q.fail2ban.maxretry ?? '?'} tries / ${q.fail2ban.findtime ?? '?'} → ban ${q.fail2ban.bantime ?? '?'}` : 'Bans IPs that fail SSH logins'} action={<Button onClick={() => setDialog('fail2ban')}>{q?.fail2ban.installed ? 'Configure' : 'Set up'}</Button>} />
+                    <Row icon={<ShieldAlert />} title="Fail2ban" value={q ? (q.fail2ban.installed ? (q.fail2ban.running ? 'Active' : 'Installed, stopped') : 'Not installed') : '…'} valueSub={q?.fail2ban.installed ? `${q.fail2ban.bannedCount ?? 0} banned · ${q.fail2ban.maxretry ?? '?'} tries / ${q.fail2ban.findtime ?? '?'} → ban ${q.fail2ban.bantime ?? '?'}${q.fail2ban.increment ? ` (escalating up to ${q.fail2ban.maxtime ?? '?'})` : ''}${q.fail2ban.mode === 'aggressive' ? ' · aggressive' : ''}` : 'Bans IPs that fail SSH logins'} action={<Button onClick={() => setDialog('fail2ban')}>{q?.fail2ban.installed ? 'Configure' : 'Set up'}</Button>} />
                     <Row icon={<Clock />} title="Time zone" value={d.timezone} valueSub={d.ntpSynced ? 'Clock synced with NTP' : 'Clock NOT synced'} action={<Button onClick={() => setDialog('timezone')}>Change</Button>} />
                     <Row icon={<Eraser />} title="Disk cleanup" value="Caches, logs, old packages" valueSub="Shows sizes before deleting" action={<Button onClick={() => setDialog('cleanup')}>Scan…</Button>} />
                   </div>
@@ -491,6 +491,9 @@ function Fail2banDialog({ serverId, q, onClose, onDone }: { serverId: string; q?
   const [bantime, setBantime] = useState(f?.bantime ?? '1h')
   const [ignore, setIgnore] = useState((f?.ignoreip ?? '').replace(/127\.0\.0\.1\/8|::1/g, '').trim())
   const [addMine, setAddMine] = useState(true)
+  const [increment, setIncrement] = useState(f?.increment ?? true)
+  const [maxtime, setMaxtime] = useState(f?.maxtime ?? '1w')
+  const [aggressive, setAggressive] = useState(f?.mode ? f.mode === 'aggressive' : true)
   const [status, setStatus] = useState<string | null>(null)
   const [unban, setUnban] = useState('')
   const { run, busy } = useAction()
@@ -522,7 +525,7 @@ function Fail2banDialog({ serverId, q, onClose, onDone }: { serverId: string; q?
             loading={busy}
             onClick={async () => {
               const ips = [ignore, addMine && q?.clientIp ? q.clientIp : ''].filter(Boolean).join(' ')
-              const ok = await run(() => api.call('qa:fail2banSetup', serverId, { maxretry: Number(maxretry), findtime, bantime, ignoreip: ips, sshPorts: q?.sshPorts ?? [22] }), { success: installed ? 'Applying Fail2ban settings' : 'Installing Fail2ban (see Tasks)' })
+              const ok = await run(() => api.call('qa:fail2banSetup', serverId, { maxretry: Number(maxretry), findtime, bantime, ignoreip: ips, sshPorts: q?.sshPorts ?? [22], increment, maxtime, aggressive }), { success: installed ? 'Applying Fail2ban settings (see Tasks)' : 'Installing Fail2ban (see Tasks)' })
               if (ok) {
                 onClose()
                 setTimeout(onDone, 5000)
@@ -545,11 +548,21 @@ function Fail2banDialog({ serverId, q, onClose, onDone }: { serverId: string; q?
           <Input value={bantime} onChange={(e) => setBantime(e.target.value)} mono />
         </Field>
       </div>
+      <div className="grid grid-cols-[1fr_140px] gap-3 items-end mt-3">
+        <Checkbox checked={increment} onChange={setIncrement} label="Repeat offenders are banned longer each time (bantime.increment)" />
+        <Field label="Up to">
+          <Input value={maxtime} onChange={(e) => setMaxtime(e.target.value)} mono disabled={!increment} />
+        </Field>
+      </div>
+      <Checkbox className="mt-2" checked={aggressive} onChange={setAggressive} label="Aggressive mode: also count probes, bad protocol attempts and rejected keys (mode = aggressive)" />
       <Field label="Never ban (IPs / CIDRs)" className="mt-3">
         <Input value={ignore} onChange={(e) => setIgnore(e.target.value)} placeholder="203.0.113.7 10.0.0.0/8" mono />
       </Field>
       {q?.clientIp && <Checkbox className="mt-3" checked={addMine} onChange={setAddMine} label={`Never ban my current IP (${q.clientIp})`} />}
-      <div className="text-[11px] text-dim mt-3">Times: s, m, h, d or w (e.g. 10m, 1d). Use -1 to ban forever. Watches SSH port(s) {q?.sshPorts.join(', ') ?? 22}.</div>
+      <div className="text-[11px] text-dim mt-3">
+        Times: s, m, h, d or w (e.g. 10m, 1d). Use -1 to ban forever. Watches SSH port(s) {q?.sshPorts.join(', ') ?? 22}. Bans go through the active firewall ({q?.firewall === 'ufw' ? 'ufw' : q?.firewall === 'firewalld' ? 'firewalld' : "fail2ban's own iptables chain"}); the config is tested with <code>fail2ban-client -t</code> before the service is restarted.
+        {f?.banaction && <> Current banaction: <code>{f.banaction}</code>.</>}
+      </div>
       {installed && (
         <div className="mt-4 border-t border-border pt-3">
           <div className="flex items-center gap-2">

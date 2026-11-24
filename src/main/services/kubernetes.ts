@@ -383,7 +383,7 @@ function sections(out: string): Record<string, string> {
     buf.length = 0
   }
   for (const line of out.split('\n')) {
-    const m = line.match(/^__([A-Z]+)$/)
+    const m = line.match(/^__([A-Z0-9]+)$/)
     if (m) {
       flush()
       cur = m[1]

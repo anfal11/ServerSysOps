@@ -196,7 +196,7 @@ export interface QuickActionsState {
   passwordAuth: boolean
   pubkeyAuth: boolean
   unattendedUpgrades: 'on' | 'off' | 'unavailable'
-  fail2ban: { installed: boolean; running: boolean; maxretry?: number; findtime?: string; bantime?: string; ignoreip?: string; bannedCount?: number }
+  fail2ban: { installed: boolean; running: boolean; maxretry?: number; findtime?: string; bantime?: string; ignoreip?: string; bannedCount?: number; increment?: boolean; maxtime?: string; mode?: string; banaction?: string }
   hostname: string
   timezone: string
   ntp: boolean

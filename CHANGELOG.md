@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.3 - 2026-11-24
+
+### Fixed
+- **Fail2ban always showed "Not installed"** on the Overview and in the Security audit, even right after a successful install: the server-state parser ignored section names containing a digit (`F2B`), and the same bug hid the audit's extra-UID-0-accounts check. Both work now.
+
+### Improved
+- **Fail2ban setup** follows a hardened recipe: `bantime.increment` with a configurable maximum (default 1 week), `mode = aggressive` for the sshd jail, `backend = systemd`, bans through the active firewall (`banaction = ufw` or firewalld rich rules, otherwise fail2ban's all-ports chain), the config is checked with `fail2ban-client -t` before the service is enabled and restarted, and the task log ends with `fail2ban-client status` / `status sshd`. The dialog shows and edits the new options, and the Overview row shows escalation and mode.
+
 ## 0.5.2 - 2026-11-22
 
 ### Fixed
